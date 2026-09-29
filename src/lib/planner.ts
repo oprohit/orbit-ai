@@ -635,7 +635,7 @@ async function hAutomationManage(m: string, { runId }: Ctx): Promise<ChatContent
   const timeMatch =
     m.match(/\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/i) ||
     m.match(/\b([01]?\d|2[0-3]):([0-5]\d)\b/) ||
-    m.match(/(?:at|every)\s+(\d{1,2})\s*(am|pm)?\b/i);
+    m.match(/(?:at|every|to)\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b/i);
 
   let newSchedule = target.schedule;
   let nextRun = target.nextRun;
@@ -885,7 +885,7 @@ async function hFallback(m: string, _ctx: Ctx): Promise<ChatContent> {
 /* ────────────────────────── router ────────────────────────── */
 
 const ROUTES: { re: RegExp; run: (m: string, ctx: Ctx) => Promise<ChatContent> }[] = [
-  { re: /(?:automation|automations)\b|(?:change|update|set|switch|reschedule|adjust)\s+.{0,40}(?:timing|schedule|time|cadence)\b|(?:turn\s+(?:on|off)|enable|disable|activate|pause)\s+.{0,40}automation\b/i, run: hAutomationManage },
+  { re: /(?:automation|automations)\b|(?:change|update|set|reschedule|adjust|switch|turn\s+(?:on|off)|enable|disable|pause)\s+.{0,50}(?:email triage|calendar check|expense report|internship search|approval ping|timing|schedule|cadence)\b|(?:email triage|calendar check|expense report|internship search|approval ping)\s*.{0,50}(?:change|update|set|to\s+\d|at\s+\d|every)\b/i, run: hAutomationManage },
   { re: /stride/i, run: hStride },
   { re: /register(ation)?|codespark/i, run: hRegister },
   { re: /(search|find|look).{0,35}(opportunit|hackathon|workshop|event for)|opportunities?( for| that)?/i, run: hOppsSearch },
