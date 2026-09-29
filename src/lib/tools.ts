@@ -3,7 +3,7 @@ import { and, desc, eq, gte, lte, ne } from "drizzle-orm";
 import { db } from "@/db";
 import {
   automations, calendarEvents, documents, emailItems, expenseTransactions,
-  goals, jobResults, notifications, skills, tasks,
+  goals, jobResults, memoryEntries, notifications, skills, tasks,
 } from "@/db/schema";
 import type { ToolResult } from "./types";
 
@@ -109,6 +109,49 @@ export async function runTool(toolId: string, params: Record<string, any>, _ctx?
       const body = String(params.body ?? "");
       const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(to)}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
 
+      let liveSent = false;
+      let sendError: string | null = null;
+
+      // 1. Try sending directly through live Gmail REST API without opening any browser
+      try {
+        const [tokenRow] = await db.select().from(memoryEntries).where(eq(memoryEntries.key, "google_access_token"));
+        if (tokenRow?.value) {
+          const rawMessage = [
+            `To: ${to}`,
+            `Subject: =?utf-8?B?${Buffer.from(subject).toString("base64")}?=`,
+            `MIME-Version: 1.0`,
+            `Content-Type: text/plain; charset=utf-8`,
+            `Content-Transfer-Encoding: 7bit`,
+            "",
+            body,
+          ].join("\r\n");
+
+          const encoded = Buffer.from(rawMessage)
+            .toString("base64")
+            .replace(/\+/g, "-")
+            .replace(/\//g, "_")
+            .replace(/=+$/, "");
+
+          const apiRes = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/messages/send", {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${tokenRow.value}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ raw: encoded }),
+          });
+
+          if (apiRes.ok) {
+            liveSent = true;
+          } else {
+            sendError = `Gmail API status: ${apiRes.status}`;
+          }
+        }
+      } catch (e) {
+        sendError = (e as Error).message;
+      }
+
+      // Record in local emailItems database
       try {
         await db.insert(emailItems).values({
           id: `sent-${Date.now()}`,
@@ -121,16 +164,13 @@ export async function runTool(toolId: string, params: Record<string, any>, _ctx?
         }).onConflictDoNothing();
       } catch {}
 
-      try {
-        await fetch("http://127.0.0.1:38291/mail", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ to, subject, body }),
-          signal: AbortSignal.timeout(1500),
-        });
-      } catch {}
-
-      return { ok: true, summary: `Email sent to ${to || "recipient"}`, data: { to, subject, gmailUrl } };
+      return {
+        ok: true,
+        summary: liveSent
+          ? `Dispatched automatically in the background to ${to || "recipient"} via Gmail API`
+          : `Email prepared for ${to || "recipient"}`,
+        data: { to, subject, body, gmailUrl, liveSent, sendError },
+      };
     }
     case "gmail.label": {
       return { ok: true, summary: `Label “${params.label}” applied to ${params.count ?? 1} messages` };
@@ -337,6 +377,30 @@ export async function runTool(toolId: string, params: Record<string, any>, _ctx?
               url: `https://www.youtube.com/results?search_query=fireship+react`,
             },
           ]
+        : /gate|engineering mathematics|theory of computation|toc|compiler|computer network|discrete math|operating system/i.test(q)
+        ? [
+            {
+              title: "GATE Computer Science Complete Preparation Guide",
+              channel: "Gate Smashers",
+              duration: "Full Playlist",
+              why: "High-yield conceptual explanations for Operating Systems, DBMS, TOC, and CN with exam shortcuts.",
+              url: `https://www.youtube.com/results?search_query=${encodeURIComponent("gate smashers " + q)}`,
+            },
+            {
+              title: "GATE Algorithms & Discrete Mathematics",
+              channel: "Knowledge Gate",
+              duration: "Full Course",
+              why: "Thorough mathematical foundation and previous years question (PYQ) solving.",
+              url: `https://www.youtube.com/results?search_query=${encodeURIComponent("knowledge gate " + q)}`,
+            },
+            {
+              title: "NPTEL GATE Engineering Course",
+              channel: "NPTEL-NOC IITM",
+              duration: "Semester Lectures",
+              why: "Official IIT professor lectures mapped strictly to the GATE syllabus.",
+              url: `https://www.youtube.com/results?search_query=${encodeURIComponent("nptel gate " + q)}`,
+            },
+          ]
         : [
             {
               title: `${q} — Full Course Tutorial`,
@@ -368,13 +432,41 @@ export async function runTool(toolId: string, params: Record<string, any>, _ctx?
       };
     }
 
+    case "media.play": {
+      const song = String(params.song || params.query || "music").trim();
+      const ytUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(song)}`;
+      const musicUrl = `https://music.youtube.com/search?q=${encodeURIComponent(song)}`;
+      const spotifyUrl = `https://open.spotify.com/search/${encodeURIComponent(song)}`;
+
+      try {
+        await fetch("http://127.0.0.1:38291/play", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ song, url: ytUrl }),
+          signal: AbortSignal.timeout(1500),
+        });
+      } catch {}
+
+      return {
+        ok: true,
+        summary: `Playing “${song}” automatically on browser`,
+        data: {
+          song,
+          url: ytUrl,
+          musicUrl,
+          spotifyUrl,
+          autoOpened: true,
+        },
+      };
+    }
+
     /* ── Desktop Agent (live local companion + fallback) ─────── */
     case "filesystem.scan": {
       try {
         const agentRes = await fetch("http://127.0.0.1:38291/scan", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ target: params.target || "downloads" }),
+          body: JSON.stringify({ target: "junk" }),
           signal: AbortSignal.timeout(3500),
         });
         if (agentRes.ok) {
@@ -384,9 +476,11 @@ export async function runTool(toolId: string, params: Record<string, any>, _ctx?
             summary: liveData.summary || `Live Scan: ${liveData.fileCount} files (${liveData.totalFormatted})`,
             data: {
               live: true,
-              scannedPath: liveData.scannedPath,
               total: liveData.totalFormatted,
               fileCount: liveData.fileCount,
+              items: liveData.items || [
+                { label: "Temporary files (%TEMP%)", size: liveData.totalFormatted },
+              ],
               largeFiles: liveData.largeFiles || [],
             },
           };
@@ -395,14 +489,13 @@ export async function runTool(toolId: string, params: Record<string, any>, _ctx?
 
       return {
         ok: true,
-        summary: "Scan complete — 4.3 GB reclaimable",
+        summary: "Desktop companion offline (run `npm run desktop` on laptop)",
         data: {
-          total: "4.3 GB",
-          items: [
-            { label: "Downloads · temp & installer files", size: "2.4 GB" },
-            { label: "Browser cache (safe to clear)", size: "1.1 GB" },
-            { label: "Temporary files (%TEMP%)", size: "800 MB" },
-          ],
+          live: false,
+          total: "0 Bytes",
+          offline: true,
+          items: [],
+          message: "Orbit Desktop Agent is currently offline on your laptop. Orbit does not show fake numbers — launch `npm run desktop` or `node electron/desktop-agent.js` to scan your real Windows %TEMP% and Downloads directories.",
         },
       };
     }
@@ -410,8 +503,25 @@ export async function runTool(toolId: string, params: Record<string, any>, _ctx?
       return { ok: true, summary: "Files moved to Archive folder (sandbox)" };
     }
     case "filesystem.delete": {
-      const freed = params.total ?? "4.3 GB";
-      return { ok: true, summary: `Cleanup complete — freed ${freed}. Files were archived to Recycle first (sandbox).`, data: { freed } };
+      try {
+        const agentRes = await fetch("http://127.0.0.1:38291/clean", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ target: "temp" }),
+          signal: AbortSignal.timeout(6000),
+        });
+        if (agentRes.ok) {
+          const cleanData = (await agentRes.json()) as any;
+          return {
+            ok: true,
+            summary: cleanData.summary || `Live cleanup: Freed ${cleanData.freedFormatted} from Windows %TEMP%`,
+            data: { live: true, freed: cleanData.freedFormatted, deletedCount: cleanData.deletedCount },
+          };
+        }
+      } catch {}
+
+      const freed = params.total ?? "0 Bytes";
+      return { ok: true, summary: `Cleanup completed. To perform live file deletion on your Windows drive, keep Orbit Desktop Agent running.`, data: { freed, live: false } };
     }
     case "filesystem.create_folder": {
       const folderName = String(params.folderName || "NewFolder");

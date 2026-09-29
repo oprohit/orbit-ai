@@ -13,7 +13,16 @@ export type Block =
   | { type: "scan"; total: string; items: { label: string; size: string }[] }
   | { type: "files"; items: { name: string; folder: string; modified: string; score: string }[] }
   | { type: "expense"; month: string; total: number; byCategory: { cat: string; amount: number }[]; insights: string[] }
-  | { type: "result"; title: string; lines: string[]; action?: { type: string; payload: any } };
+  | { type: "result"; title: string; lines: string[]; action?: { type: string; payload: any } }
+  | {
+      type: "study_plan";
+      title: string;
+      goal: string;
+      timeline: string;
+      phases: { name: string; duration: string; focus: string }[];
+      subtasks: { id: string; title: string; status: "pending" | "in_progress" | "done"; weight?: string }[];
+      resources: { title: string; channel: string; duration: string; why: string; url: string }[];
+    };
 
 export type ChatContent = { text: string; blocks?: Block[] };
 

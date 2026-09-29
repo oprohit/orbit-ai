@@ -92,7 +92,38 @@ function startDesktopAgent() {
         try {
           const parsed = body ? JSON.parse(body) : {};
           const home = os.homedir();
-          const target = parsed.target || "downloads";
+          const target = parsed.target || "junk";
+
+          if (target === "junk" || target === "all") {
+            const tempPath = os.tmpdir();
+            const downPath = path.join(home, "Downloads");
+
+            const [tempRes, downRes] = await Promise.all([
+              scanFolder(tempPath, 1),
+              scanFolder(downPath, 1),
+            ]);
+
+            const totalBytes = tempRes.totalBytes + downRes.totalBytes;
+            const items = [
+              { label: "Temporary files (%TEMP%)", size: formatBytes(tempRes.totalBytes), bytes: tempRes.totalBytes, path: tempPath },
+              { label: "Downloads (temp & installer files)", size: formatBytes(downRes.totalBytes), bytes: downRes.totalBytes, path: downPath },
+            ];
+
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(
+              JSON.stringify({
+                ok: true,
+                live: true,
+                totalFormatted: formatBytes(totalBytes),
+                totalBytes,
+                items,
+                fileCount: tempRes.fileCount + downRes.fileCount,
+                largeFiles: [...tempRes.largeFiles, ...downRes.largeFiles].slice(0, 10),
+                summary: `Live Windows Scan: ${formatBytes(totalBytes)} reclaimable across %TEMP% and Downloads`,
+              })
+            );
+            return;
+          }
 
           let scanPath = path.join(home, "Downloads");
           if (target === "temp") scanPath = os.tmpdir();
@@ -104,6 +135,7 @@ function startDesktopAgent() {
           res.end(
             JSON.stringify({
               ok: true,
+              live: true,
               scannedPath: scanPath,
               totalFormatted: formatBytes(result.totalBytes),
               totalBytes: result.totalBytes,
@@ -161,6 +193,73 @@ function startDesktopAgent() {
       return;
     }
 
+    if (url.pathname === "/clean" && req.method === "POST") {
+      let body = "";
+      req.on("data", (chunk) => (body += chunk));
+      req.on("end", async () => {
+        try {
+          const tempPath = os.tmpdir();
+          let deletedBytes = 0;
+          let deletedCount = 0;
+          const entries = await fs.promises.readdir(tempPath, { withFileTypes: true });
+          for (const entry of entries) {
+            if (entry.isFile()) {
+              const fullPath = path.join(tempPath, entry.name);
+              try {
+                const stats = await fs.promises.stat(fullPath);
+                await fs.promises.unlink(fullPath);
+                deletedBytes += stats.size;
+                deletedCount++;
+              } catch (e) {
+                // File locked by Windows or in use by another app — safe to ignore
+              }
+            }
+          }
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(
+            JSON.stringify({
+              ok: true,
+              live: true,
+              freedBytes: deletedBytes,
+              freedFormatted: formatBytes(deletedBytes),
+              deletedCount,
+              summary: `Safely removed ${deletedCount} temporary files (${formatBytes(deletedBytes)}) from %TEMP%`,
+            })
+          );
+        } catch (e) {
+          res.writeHead(500, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: e.message }));
+        }
+      });
+      return;
+    }
+
+    if (url.pathname === "/play" && req.method === "POST") {
+      let body = "";
+      req.on("data", (chunk) => (body += chunk));
+      req.on("end", () => {
+        try {
+          const parsed = body ? JSON.parse(body) : {};
+          const song = parsed.song || "music";
+          const targetUrl = parsed.url || `https://www.youtube.com/results?search_query=${encodeURIComponent(song)}`;
+          exec(`start "" "${targetUrl}"`);
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(
+            JSON.stringify({
+              ok: true,
+              song,
+              url: targetUrl,
+              summary: `Playing "${song}" on default browser`,
+            })
+          );
+        } catch (e) {
+          res.writeHead(500, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: e.message }));
+        }
+      });
+      return;
+    }
+
     if (url.pathname === "/mail" && req.method === "POST") {
       let body = "";
       req.on("data", (chunk) => (body += chunk));
@@ -172,14 +271,17 @@ function startDesktopAgent() {
           const mailBody = encodeURIComponent(parsed.body || "");
 
           const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${to}&su=${subject}&body=${mailBody}`;
-          exec(`start "" "${gmailUrl}"`);
+          if (parsed.openInBrowser) {
+            exec(`start "" "${gmailUrl}"`);
+          }
 
           res.writeHead(200, { "Content-Type": "application/json" });
           res.end(
             JSON.stringify({
               ok: true,
               gmailUrl,
-              summary: `Opened compose draft to ${parsed.to || "recipient"}`,
+              opened: !!parsed.openInBrowser,
+              summary: `Mail prepared for ${parsed.to || "recipient"}`,
             })
           );
         } catch (e) {

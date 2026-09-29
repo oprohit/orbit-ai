@@ -128,13 +128,15 @@ export async function llmReply(userMessage: string, context: string): Promise<st
 
 export async function generateNaturalEmail(
   userPrompt: string,
-  to: string
+  to: string,
+  senderName: string = "Aarav"
 ): Promise<{ subject: string; body: string }> {
   const key = process.env.OPENROUTER_API_KEY || "";
   const nameCandidate = to.split("@")[0].replace(/[^a-zA-Z]/g, " ").trim();
   const recipientName = nameCandidate ? nameCandidate.charAt(0).toUpperCase() + nameCandidate.slice(1).toLowerCase() : "there";
+  const user = senderName.trim() || "User";
 
-  const prompt = `You are an AI generating a natural, human-written email from Aarav to ${recipientName} (${to}).
+  const prompt = `You are an AI generating a natural, human-written email from ${user} to ${recipientName} (${to}).
 The user request is: "${userPrompt}".
 Understand the user's intent:
 - If greeting for morning/afternoon/evening: write a warm, friendly greeting for that time of day.
@@ -144,7 +146,7 @@ Understand the user's intent:
 Respond ONLY with valid JSON:
 {
   "subject": "natural email subject line",
-  "body": "natural email body text signed by Aarav"
+  "body": "natural email body text signed by ${user}"
 }`;
 
   const models = [
@@ -194,37 +196,37 @@ Respond ONLY with valid JSON:
   if (/morning/i.test(lower)) {
     return {
       subject: `Good Morning, ${recipientName}!`,
-      body: `Hi ${recipientName},\n\nWishing you a wonderful morning and a productive day ahead!\n\nBest regards,\nAarav`,
+      body: `Hi ${recipientName},\n\nWishing you a wonderful morning and a productive day ahead!\n\nBest regards,\n${user}`,
     };
   }
   if (/afternoon/i.test(lower)) {
     return {
       subject: `Good Afternoon, ${recipientName}!`,
-      body: `Hi ${recipientName},\n\nHope your day is going well! Just wanted to send warm afternoon greetings your way.\n\nWarm regards,\nAarav`,
+      body: `Hi ${recipientName},\n\nHope your day is going well! Just wanted to send warm afternoon greetings your way.\n\nWarm regards,\n${user}`,
     };
   }
   if (/evening|night/i.test(lower)) {
     return {
       subject: `Good Evening, ${recipientName}`,
-      body: `Hi ${recipientName},\n\nHope you had a great day today. Wishing you a peaceful and relaxing evening.\n\nBest regards,\nAarav`,
+      body: `Hi ${recipientName},\n\nHope you had a great day today. Wishing you a peaceful and relaxing evening.\n\nBest regards,\n${user}`,
     };
   }
   if (/greet|hello|hi\b/i.test(lower)) {
     return {
-      subject: `Warm Greetings from Aarav`,
-      body: `Hi ${recipientName},\n\nHope you are having a great day! Reaching out to say hello and wish you all the best.\n\nBest regards,\nAarav`,
+      subject: `Warm Greetings from ${user}`,
+      body: `Hi ${recipientName},\n\nHope you are having a great day! Reaching out to say hello and wish you all the best.\n\nBest regards,\n${user}`,
     };
   }
   if (/leave|sick|absence|unwell/i.test(lower)) {
     return {
-      subject: `Leave Request — Aarav`,
-      body: `Dear ${recipientName},\n\nI am writing to let you know that I am feeling unwell today and will be unable to attend. I will review all class material and catch up on any tasks promptly.\n\nThank you for understanding,\nAarav`,
+      subject: `Leave Request — ${user}`,
+      body: `Dear ${recipientName},\n\nI am writing to let you know that I am feeling unwell today and will be unable to attend. I will review all class material and catch up on any tasks promptly.\n\nThank you for understanding,\n${user}`,
     };
   }
 
   return {
-    subject: `Note from Aarav`,
-    body: `Hi ${recipientName},\n\nHope this finds you well. I wanted to reach out regarding ${userPrompt.replace(/^.*?(?:about|for|to)\s+/i, "") || "our work"}.\n\nBest regards,\nAarav`,
+    subject: `Note from ${user}`,
+    body: `Hi ${recipientName},\n\nHope this finds you well. I wanted to reach out regarding ${userPrompt.replace(/^.*?(?:about|for|to)\s+/i, "") || "our work"}.\n\nBest regards,\n${user}`,
   };
 }
 

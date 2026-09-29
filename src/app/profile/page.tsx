@@ -2,6 +2,7 @@ import { asc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { memoryEntries, profiles } from "@/db/schema";
 import { Badge, Card, DemoTag, Icon, PageHead } from "@/components/ui";
+import ProfileEditor from "@/components/ProfileEditor";
 import MemoryList from "@/components/MemoryList";
 import type { MemoryView } from "@/components/MemoryList";
 
@@ -23,19 +24,14 @@ export default async function ProfilePage() {
       <PageHead title="Profile" sub="Identity, controlled memory and AI routing." right={<DemoTag />} />
       <div className="grid gap-3 lg:grid-cols-[1fr_1fr]">
         <div className="space-y-3">
-          <Card className="p-4">
-            <div className="flex items-center gap-3">
-              <span className="grid h-12 w-12 place-items-center rounded-xl bg-accent-soft font-display text-[18px] font-semibold text-accent">A</span>
-              <div>
-                <div className="text-[15px] font-semibold text-ink">{p?.name ?? "Aarav"}</div>
-                <div className="text-[12px] text-faint">{p?.email} · {p?.timezone}</div>
-                <div className="mt-1 flex gap-1.5">
-                  <Badge tone="accent">student</Badge>
-                  <Badge tone="muted">COET · CSE 3rd year</Badge>
-                </div>
-              </div>
-            </div>
-          </Card>
+          <ProfileEditor
+            initialProfile={{
+              id: p?.id ?? "u1",
+              name: p?.name ?? "Aarav",
+              email: p?.email ?? null,
+              timezone: p?.timezone ?? "Asia/Kolkata",
+            }}
+          />
 
           <Card className="p-4">
             <div className="mb-2 flex items-center justify-between">

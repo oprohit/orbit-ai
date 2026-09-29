@@ -200,6 +200,27 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ ok: true });
       }
 
+      case "profile.update": {
+        const profileId = id || "u1";
+        const [p] = await db.select().from(profiles).where(eq(profiles.id, profileId));
+        if (p) {
+          await db.update(profiles).set({
+            name: b.name ? String(b.name).trim() : p.name,
+            email: b.email ? String(b.email).trim() : p.email,
+            timezone: b.timezone ? String(b.timezone).trim() : p.timezone,
+          }).where(eq(profiles.id, profileId));
+        } else {
+          await db.insert(profiles).values({
+            id: profileId,
+            name: b.name ? String(b.name).trim() : "User",
+            email: b.email ? String(b.email).trim() : null,
+            timezone: b.timezone ? String(b.timezone).trim() : "Asia/Kolkata",
+          });
+        }
+        await logAudit({ action: `profile.update — name: ${b.name}`, authorization: "allowed" });
+        return NextResponse.json({ ok: true, name: b.name });
+      }
+
       case "connector.revoke": {
         await db.update(connectors).set({ status: "available", connectedAt: null, lastSync: null }).where(eq(connectors.id, id));
         await logAudit({ action: `connector.revoked — ${id}`, connectorId: id, authorization: "approved" });

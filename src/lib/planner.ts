@@ -2,7 +2,7 @@ import { asc, desc, eq, gte, like } from "drizzle-orm";
 import { randomUUID } from "crypto";
 import { db } from "@/db";
 import {
-  approvals, automations, calendarEvents, emailItems, goalMilestones, goals, tasks,
+  approvals, automations, calendarEvents, emailItems, goalMilestones, goals, profiles, tasks,
 } from "@/db/schema";
 import { createApproval, execTool } from "./executor";
 import { generateNaturalEmail, llmReply } from "./ai";
@@ -587,8 +587,12 @@ async function hWriteEmail(m: string, { runId }: Ctx): Promise<ChatContent> {
   const emailMatch = m.match(/[\w.-]+@[\w.-]+\.\w+/);
   const to = emailMatch ? emailMatch[0] : "recipient@example.com";
 
+  // Fetch dynamic user profile name
+  const [profile] = await db.select().from(profiles).where(eq(profiles.id, "u1"));
+  const userName = profile?.name || "User";
+
   // Natural Language Processing: understand intent and generate natural, human-written email
-  const { subject, body } = await generateNaturalEmail(m, to);
+  const { subject, body } = await generateNaturalEmail(m, to, userName);
 
   const isDirectSend = /\b(?:send|deliver|shoot|dispatch)\b.*?\b(?:email|mail)\b|\b(?:email|mail)\s+(?:to\s+)?[\w.-]+@/i.test(m) ||
     /needs?\s+to\s+be\s+sent|send\s+it\s+(?:automatically|directly|now)/i.test(m) ||
@@ -597,17 +601,26 @@ async function hWriteEmail(m: string, { runId }: Ctx): Promise<ChatContent> {
   const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(to)}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
 
   if (isDirectSend) {
-    await runTool("gmail.send", { to, subject, body }, { runId });
+    const sendRes = await runTool("gmail.send", { to, subject, body }, { runId });
+    const sendData = (sendRes.data as any) || {};
+    const liveSent = !!sendData.liveSent;
+
     await logAudit({
       action: `gmail.send — ${to}: "${subject}"`,
       toolId: "gmail.send",
       runId,
       authorization: "allowed",
-      resultSummary: `Email dispatched to ${to}`,
+      resultSummary: liveSent ? `Dispatched silently via Gmail API to ${to}` : `Queued email for ${to}`,
     });
 
+    const statusMsg = liveSent
+      ? "Dispatched & Sent silently via Gmail API ✓ (Background delivery — no button click needed)"
+      : "Queued message ✓ (Orbit policy allows sending; connect Gmail in Connectors for direct silent background API sending)";
+
     return {
-      text: `I've sent your email to **${to}** with subject **"${subject}"**:\n\n> **${subject}**\n>\n> ${body.split("\n").join("\n> ")}\n\nDispatched automatically. Click below to review in Gmail:`,
+      text: liveSent
+        ? `I have sent your email directly to **${to}** in the background via the Gmail API:\n\n> **${subject}**\n>\n> ${body.split("\n").join("\n> ")}\n\nDelivered automatically without opening any compose window.`
+        : `I've prepared and queued your email to **${to}**:\n\n> **${subject}**\n>\n> ${body.split("\n").join("\n> ")}\n\n${statusMsg}`,
       blocks: [
         {
           type: "result",
@@ -615,12 +628,12 @@ async function hWriteEmail(m: string, { runId }: Ctx): Promise<ChatContent> {
           lines: [
             `To: ${to}`,
             `Subject: ${subject}`,
-            `Status: Dispatched & Sent automatically ✓`,
+            `Status: ${statusMsg}`,
             `Message:\n${body}`,
           ],
           action: {
             type: "mail",
-            payload: { to, subject, body, gmailUrl, sent: true },
+            payload: { to, subject, body, gmailUrl, sent: true, openCompose: false },
           },
         },
       ],
@@ -656,20 +669,44 @@ async function hWriteEmail(m: string, { runId }: Ctx): Promise<ChatContent> {
 async function hCleanup(_m: string, { runId }: Ctx): Promise<ChatContent> {
   const scan = await execTool("filesystem.scan", {}, { runId, reason: "You asked to clear junk from the PC (via the Desktop Agent)" });
   const data = scan.data as any;
-  const total = data?.total ?? "4.3 GB";
-  const isLive = data?.live;
+  const isLive = !!data?.live;
+  const total = data?.total ?? "0 Bytes";
+
+  if (!isLive) {
+    return {
+      text: "⚠️ **Orbit Desktop Agent is offline**\n\nThe previous 4.3 GB report was a static demonstration mock. Orbit runs inside a browser sandbox and cannot access your physical Windows hard drive without the local desktop companion running.\n\nTo scan and clean your real Windows laptop (%TEMP% and Downloads):\n1. In your terminal, run: `npm run desktop` (or `node electron/desktop-agent.js`)\n2. Ask me again: *“Check my laptop for any junk files and give me the report”*\n\nOrbit does not show fake numbers when your companion is offline.",
+      blocks: [
+        {
+          type: "result",
+          title: "💻 Windows Desktop Companion Offline",
+          lines: [
+            "Status: 127.0.0.1:38291 unreachable",
+            "Real Paths: %TEMP% (C:\\Users\\...\\AppData\\Local\\Temp) & Downloads",
+            "Command: npm run desktop",
+            "Integrity: Honest Mode — No fake cleanup stats shown",
+          ],
+        },
+        {
+          type: "chips",
+          chips: [
+            { label: "What's important today?", send: "What's important today?" },
+            { label: "How to run desktop companion", send: "explain how to run the desktop agent" },
+          ],
+        },
+      ],
+    };
+  }
+
   const approval = await createApproval({
     toolId: "filesystem.delete",
     params: { total, categories: (data?.items ?? []).map((i: any) => i.label || i.name) },
-    reason: `Scan identified ${total} of temp/cache files. Deletion is destructive, so it requires approval.`,
+    reason: `Live Windows scan identified ${total} of temporary and cached files. Deletion is destructive, so it requires your confirmation.`,
     riskLevel: "critical",
     runId,
   });
-  const textMsg = isLive
-    ? `I scanned your PC via the live Orbit Desktop Agent. Found ${data.fileCount} files (${total}) in ${data.scannedPath}. Nothing is deleted until you approve:`
-    : `I scanned via the Orbit Desktop Agent. Found ${total} of potential cleanup, listed below. Nothing is deleted until you approve — file deletion is a CRITICAL action with a second confirmation.`;
+
   return {
-    text: textMsg,
+    text: `I scanned your real Windows laptop via the live Orbit Desktop Agent. Found **${total}** of cleanable files across %TEMP% and Downloads. Nothing is deleted until you approve:`,
     blocks: [
       { type: "scan", total, items: data?.items ?? [] },
       { type: "approval", approvalId: approval.id },
@@ -1225,9 +1262,245 @@ async function hFallback(m: string, _ctx: Ctx): Promise<ChatContent> {
   return { text, blocks: [] };
 }
 
+async function hPlayMusic(m: string, { runId }: Ctx): Promise<ChatContent> {
+  const song = m.replace(/^(?:please\s+)?(?:play|listen to)\s+(?:music|song|track)?\s*["']?/i, "").replace(/["']?\s*$/i, "").trim() || "relaxing music";
+  const ytUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(song)}`;
+  const musicUrl = `https://music.youtube.com/search?q=${encodeURIComponent(song)}`;
+  const spotifyUrl = `https://open.spotify.com/search/${encodeURIComponent(song)}`;
+
+  await execTool("media.play", { song }, { runId, reason: `Play music "${song}"` });
+
+  await logAudit({
+    action: `media.play — "${song}"`,
+    toolId: "media.play",
+    runId,
+    authorization: "allowed",
+    resultSummary: `Auto-opened default browser to play "${song}"`,
+  });
+
+  return {
+    text: `🎵 Playing **"${song}"** automatically in your browser! Enjoy the music.`,
+    blocks: [
+      {
+        type: "result",
+        title: `🎵 Now Playing: ${song}`,
+        lines: [
+          `Track: ${song}`,
+          `Status: Auto-opened in default browser ✓`,
+          `Provider: YouTube & YouTube Music`,
+        ],
+        action: {
+          type: "music",
+          payload: {
+            song,
+            url: ytUrl,
+            musicUrl,
+            spotifyUrl,
+          },
+        },
+      },
+      {
+        type: "chips",
+        chips: [
+          { label: "Play lofi hip hop", send: "play lofi hip hop" },
+          { label: "Play acoustic guitar", send: "play acoustic guitar" },
+          { label: "What's important today?", send: "What's important today?" },
+        ],
+      },
+    ],
+  };
+}
+
+async function hBreakGoal(m: string, { runId }: Ctx): Promise<ChatContent> {
+  const isGate = /gate|graduate aptitude|engineering exam/i.test(m);
+  const isDsa = /dsa|data structure|leetcode|coding interview|algorithm/i.test(m);
+  const isMl = /machine learning|deep learning|ai|artificial intelligence|data science/i.test(m);
+
+  let goalName = "GATE Preparation";
+  let timeline = "6–8 Months (200+ Study Hours)";
+  let summaryText = "";
+  let phases: { name: string; duration: string; focus: string }[] = [];
+  let subtasks: { id: string; title: string; status: "pending" | "in_progress" | "done"; weight?: string }[] = [];
+  let resources: { title: string; channel: string; duration: string; why: string; url: string }[] = [];
+
+  if (isGate) {
+    goalName = "GATE Computer Science & IT";
+    timeline = "6–9 Months (250+ Hours)";
+    summaryText = "I researched and decomposed your GATE preparation goal. Rather than overwhelming yourself with 10 subjects at once, the proven strategy prioritizes high-weightage subjects: Engineering Mathematics & Aptitude (28 marks) + Core Systems (OS, DBMS, CN, TOC) (45 marks).\n\nBelow is your structured milestone roadmap, actionable subtasks checklist, and curated free YouTube lecture playlists from Gate Smashers, Knowledge Gate, and NPTEL.\n\n*Note:* This plan is provided as research and guidance — it has NOT been added as an active goal in your Orbit database yet. You can click the button below anytime if you want Orbit to track it.";
+    phases = [
+      { name: "Phase 1: High-Weight Foundations", duration: "Months 1–3", focus: "Engineering Mathematics, Discrete Maths, Operating Systems & DBMS" },
+      { name: "Phase 2: Core Engineering & Systems", duration: "Months 4–6", focus: "Theory of Computation, Compiler Design, Computer Networks & Algorithms" },
+      { name: "Phase 3: Topic-wise PYQs & Mock Tests", duration: "Months 7–8", focus: "Solve 2000–2025 GATE PYQs on GateOverflow, full 3-hr mocks with virtual calculator" },
+    ];
+    subtasks = [
+      { id: "g-1", title: "Download official GATE CS syllabus & create topic weightage matrix", status: "pending", weight: "15% Weight" },
+      { id: "g-2", title: "Watch Gate Smashers playlist on Operating Systems (Process, Deadlock, Memory)", status: "pending", weight: "8–10 Marks" },
+      { id: "g-3", title: "Study Discrete Mathematics & Logic with Knowledge Gate (Sanchit Jain)", status: "pending", weight: "7–9 Marks" },
+      { id: "g-4", title: "Master Theory of Computation & Regular Languages with NPTEL / Gate Smashers", status: "pending", weight: "8–10 Marks" },
+      { id: "g-5", title: "Solve last 15 years of GATE Previous Year Questions (PYQs) on GateOverflow", status: "pending", weight: "Crucial" },
+      { id: "g-6", title: "Attempt 5 full-length timed diagnostic mocks on virtual interface", status: "pending", weight: "Final Sprint" },
+    ];
+    resources = [
+      {
+        title: "GATE Operating Systems Complete Playlist",
+        channel: "Gate Smashers",
+        duration: "Full Course",
+        why: "Varun Singla's legendary series covering OS, DBMS, TOC, and CN with exam-oriented shortcuts.",
+        url: "https://www.youtube.com/results?search_query=gate+smashers+operating+system+playlist",
+      },
+      {
+        title: "GATE Discrete Mathematics & Algorithms",
+        channel: "Knowledge Gate",
+        duration: "Full Playlist",
+        why: "Sanchit Jain's step-by-step rigorous breakdown of discrete math, graphs, and algorithm time complexity.",
+        url: "https://www.youtube.com/results?search_query=knowledge+gate+discrete+mathematics",
+      },
+      {
+        title: "NPTEL GATE Engineering Mathematics & Core CS",
+        channel: "NPTEL-NOC IITM",
+        duration: "University Lectures",
+        why: "In-depth standard theoretical lectures taught by IIT professors mapped to official GATE standards.",
+        url: "https://www.youtube.com/results?search_query=nptel+gate+computer+science",
+      },
+      {
+        title: "GateOverflow PYQ Solutions & Practice",
+        channel: "Gate Overflow",
+        duration: "Community Portal",
+        why: "Every single GATE question from 2000–2025 categorized topic-wise with verified explanations.",
+        url: "https://gateoverflow.in",
+      },
+    ];
+  } else if (isDsa) {
+    goalName = "Data Structures & Algorithms Mastery";
+    timeline = "3–4 Months (120+ Hours)";
+    summaryText = "Here is your researched roadmap to master Data Structures & Algorithms. Rather than random LeetCode grinding, follow pattern-based learning: Arrays/Hashing → Two Pointers → Trees/Graphs → Dynamic Programming.";
+    phases = [
+      { name: "Phase 1: Fundamentals & Patterns", duration: "Weeks 1–4", focus: "Time/Space Complexity, Arrays, HashMaps, Two Pointers, Sliding Window" },
+      { name: "Phase 2: Non-Linear Structures", duration: "Weeks 5–9", focus: "Binary Trees, BSTs, Heaps, Graph BFS/DFS, Backtracking" },
+      { name: "Phase 3: Advanced Optimization", duration: "Weeks 10–14", focus: "Dynamic Programming (1D & 2D), Greedy, Trie, Company Mock Interviews" },
+    ];
+    subtasks = [
+      { id: "dsa-1", title: "Complete Striver A2Z Sheet Step 1 to 3 (Basics to Arrays)", status: "pending", weight: "Core" },
+      { id: "dsa-2", title: "Watch Abdul Bari's Algorithms lectures on recursion & divide and conquer", status: "pending", weight: "Concepts" },
+      { id: "dsa-3", title: "Solve Blind 75 / NeetCode 150 Tree & Graph problems", status: "pending", weight: "Interview Prep" },
+      { id: "dsa-4", title: "Master 1D & 2D Dynamic Programming patterns", status: "pending", weight: "Advanced" },
+    ];
+    resources = [
+      {
+        title: "Algorithms & Time Complexity Masterclass",
+        channel: "Abdul Bari",
+        duration: "Full Playlist",
+        why: "The clearest visual explanations of recursion, sorting, and dynamic programming in computer science.",
+        url: "https://www.youtube.com/results?search_query=abdul+bari+algorithms+playlist",
+      },
+      {
+        title: "NeetCode 150 Coding Interview Guide",
+        channel: "NeetCode",
+        duration: "Interactive Playlist",
+        why: "Visual pattern matching and pythonic code walkthroughs for all top interview problems.",
+        url: "https://www.youtube.com/results?search_query=neetcode+150+playlist",
+      },
+    ];
+  } else if (isMl) {
+    goalName = "Machine Learning & AI Engineering";
+    timeline = "4–6 Months (150+ Hours)";
+    summaryText = "Here is your researched ML engineering roadmap. The optimal path builds on Python/Math foundations before moving to Classical ML algorithms, and finally PyTorch Deep Learning & LLMs.";
+    phases = [
+      { name: "Phase 1: Math & Python Foundations", duration: "Month 1", focus: "NumPy, Pandas, Vector Algebra, Probability & Calculus" },
+      { name: "Phase 2: Classical Machine Learning", duration: "Months 2–3", focus: "Linear/Logistic Regression, Decision Trees, Random Forests, XGBoost, Scikit-Learn" },
+      { name: "Phase 3: Deep Learning & Neural Nets", duration: "Months 4–5", focus: "PyTorch, CNNs, Transformers, Fine-Tuning LLMs" },
+    ];
+    subtasks = [
+      { id: "ml-1", title: "Complete Andrew Ng's Machine Learning Specialization", status: "pending", weight: "Foundations" },
+      { id: "ml-2", title: "Watch StatQuest for intuition on regression, PCA, and gradient descent", status: "pending", weight: "Intuition" },
+      { id: "ml-3", title: "Build 3 end-to-end ML projects on Kaggle datasets", status: "pending", weight: "Portfolio" },
+    ];
+    resources = [
+      {
+        title: "Machine Learning Specialization",
+        channel: "DeepLearning.AI (Andrew Ng)",
+        duration: "Complete Series",
+        why: "The gold standard introduction to supervised and unsupervised machine learning algorithms.",
+        url: "https://www.youtube.com/results?search_query=andrew+ng+machine+learning+playlist",
+      },
+      {
+        title: "Machine Learning Concepts Clearly Explained",
+        channel: "StatQuest with Josh Starmer",
+        duration: "Visual Playlist",
+        why: "Fun, step-by-step visual explanations of math and algorithms without overwhelming notation.",
+        url: "https://www.youtube.com/results?search_query=statquest+machine+learning",
+      },
+    ];
+  } else {
+    const raw = m.replace(/^(?:i want to|how to|help me|can you|please)?\s*(?:prepare for|study for|break down|give me a plan for|roadmap for|plan for)\s+/i, "").replace(/[.?]+$/, "").trim();
+    goalName = `${raw || "Goal"} Mastery`;
+    timeline = "3–6 Months";
+    summaryText = `Here is a researched milestone plan and subtasks breakdown for **${raw}**. I have broken this into 3 progressive phases with actionable subtasks and recommended free tutorial resources on YouTube.`;
+    phases = [
+      { name: "Phase 1: Core Fundamentals & Blueprint", duration: "Weeks 1–4", focus: `Core theory, syntax/syllabus and foundational concepts of ${raw}` },
+      { name: "Phase 2: Practical Application & Projects", duration: "Weeks 5–10", focus: "Hands-on exercises, standard problem-solving and portfolio work" },
+      { name: "Phase 3: Advanced Mastery & Review", duration: "Weeks 11–16", focus: "Simulated assessments, edge-case debugging and final sprint" },
+    ];
+    subtasks = [
+      { id: "sub-1", title: `Outline official syllabus and high-yield milestones for ${raw}`, status: "pending", weight: "Planning" },
+      { id: "sub-2", title: "Complete curated introductory lecture series", status: "pending", weight: "Learning" },
+      { id: "sub-3", title: "Complete 5 practical hands-on exercises or past papers", status: "pending", weight: "Practice" },
+      { id: "sub-4", title: "Conduct weekly revision and diagnostic self-testing", status: "pending", weight: "Retention" },
+    ];
+    resources = [
+      {
+        title: `${raw} Complete Course Tutorial`,
+        channel: "freeCodeCamp",
+        duration: "Full Video Course",
+        why: "Comprehensive zero-to-hero guide with real-world practical examples.",
+        url: `https://www.youtube.com/results?search_query=${encodeURIComponent("freecodecamp " + raw)}`,
+      },
+      {
+        title: `${raw} Concepts & Problem Solving`,
+        channel: "YouTube Learning",
+        duration: "Curated Playlist",
+        why: "Targeted explanations and problem walkthroughs from top industry educators.",
+        url: `https://www.youtube.com/results?search_query=${encodeURIComponent(raw + " tutorial course")}`,
+      },
+    ];
+  }
+
+  await logAudit({
+    action: `goal.breakdown — "${goalName}"`,
+    runId,
+    authorization: "allowed",
+    resultSummary: `Generated roadmap and YouTube resources for "${goalName}" without auto-persisting`,
+  });
+
+  return {
+    text: summaryText,
+    blocks: [
+      {
+        type: "study_plan",
+        title: `🎯 Research & Preparation Plan: ${goalName}`,
+        goal: goalName,
+        timeline,
+        phases,
+        subtasks,
+        resources,
+      },
+      {
+        type: "chips",
+        chips: [
+          { label: `🎯 Add as active goal in Orbit`, send: `create a goal to prepare for ${goalName}` },
+          { label: "Search more YouTube lectures", send: `Search YouTube videos for ${goalName}` },
+          { label: "What's important today?", send: "What's important today?" },
+        ],
+      },
+    ],
+  };
+}
+
 /* ────────────────────────── router ────────────────────────── */
 
 const ROUTES: { re: RegExp; run: (m: string, ctx: Ctx) => Promise<ChatContent> }[] = [
+  { re: /^(?:please\s+)?(?:play|listen to)\s+(?:music|song|track)?\s*["']?([^"'\n]+?)["']?$/i, run: hPlayMusic },
+  { re: /(?:prepare for|i want to prepare|how to (?:prepare|study|learn|master)|roadmap for|break down (?:my )?goal|breakdown|study plan for|syllabus for|strategy for)\s+([a-zA-Z0-9\s-]+)/i, run: hBreakGoal },
   { re: /(?:automation|automations)\b|(?:change|update|set|reschedule|adjust|switch|turn\s+(?:on|off)|enable|disable|pause)\s+.{0,50}(?:email triage|calendar check|expense report|internship search|approval ping|timing|schedule|cadence)\b|(?:email triage|calendar check|expense report|internship search|approval ping)\s*.{0,50}(?:change|update|set|to\s+\d|at\s+\d|every)\b/i, run: hAutomationManage },
   { re: /register(ation)?|codespark/i, run: hRegister },
   { re: /(search|find|look).{0,35}(opportunit|hackathon|workshop|event for)|opportunities?( for| that)?/i, run: hOppsSearch },

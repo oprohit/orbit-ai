@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
+import { randomUUID } from "crypto";
 import { db } from "@/db";
-import { connectors, emailItems } from "@/db/schema";
+import { connectors, emailItems, memoryEntries } from "@/db/schema";
 import { logAudit } from "@/lib/audit";
 
 export const dynamic = "force-dynamic";
@@ -44,8 +45,40 @@ export async function GET(req: NextRequest) {
       return NextResponse.redirect(`${baseUrl}/connectors?error=token_exchange_failed`);
     }
 
-    const tokens = (await tokenRes.json()) as { access_token: string };
+    const tokens = (await tokenRes.json()) as { access_token: string; refresh_token?: string };
     const accessToken = tokens.access_token;
+    const refreshToken = tokens.refresh_token;
+
+    // Save tokens in memory entries for background email sending
+    try {
+      const existingToken = await db.select().from(memoryEntries).where(eq(memoryEntries.key, "google_access_token"));
+      if (existingToken.length > 0) {
+        await db.update(memoryEntries).set({ value: accessToken }).where(eq(memoryEntries.key, "google_access_token"));
+      } else {
+        await db.insert(memoryEntries).values({
+          id: randomUUID(),
+          key: "google_access_token",
+          value: accessToken,
+          kind: "connector",
+        });
+      }
+
+      if (refreshToken) {
+        const existingRefresh = await db.select().from(memoryEntries).where(eq(memoryEntries.key, "google_refresh_token"));
+        if (existingRefresh.length > 0) {
+          await db.update(memoryEntries).set({ value: refreshToken }).where(eq(memoryEntries.key, "google_refresh_token"));
+        } else {
+          await db.insert(memoryEntries).values({
+            id: randomUUID(),
+            key: "google_refresh_token",
+            value: refreshToken,
+            kind: "connector",
+          });
+        }
+      }
+    } catch (e) {
+      console.error("Error storing token:", e);
+    }
 
     // 2. Fetch user email
     let userEmail = "User";

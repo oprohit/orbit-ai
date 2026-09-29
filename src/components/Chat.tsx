@@ -323,6 +323,128 @@ function BlockView({ b, approvals, onDecide, busy, onSend }: { b: Block; approva
               </a>
             </div>
           )}
+          {b.action?.type === "music" && (
+            <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-line/60 pt-2.5">
+              <a
+                href={b.action?.payload?.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-accent/40 bg-accent px-3 py-1.5 text-[11.5px] font-medium text-white shadow-sm transition hover:brightness-110 glow-accent"
+              >
+                <Icon name="orbit" size={13} /> Play on YouTube ↗
+              </a>
+              {b.action?.payload?.musicUrl && (
+                <a
+                  href={b.action?.payload?.musicUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-surface px-2.5 py-1.5 text-[11.5px] font-medium text-muted transition hover:bg-white/5 hover:text-ink"
+                >
+                  YouTube Music ↗
+                </a>
+              )}
+              {b.action?.payload?.spotifyUrl && (
+                <a
+                  href={b.action?.payload?.spotifyUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-surface px-2.5 py-1.5 text-[11.5px] font-medium text-muted transition hover:bg-white/5 hover:text-ink"
+                >
+                  Spotify ↗
+                </a>
+              )}
+            </div>
+          )}
+        </div>
+      );
+    case "study_plan":
+      return (
+        <div className="fade-up rounded-xl border border-line bg-surface p-4 space-y-3.5 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line/60 pb-3">
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="grid h-6 w-6 place-items-center rounded-lg bg-accent-soft text-accent">
+                  <Icon name="goals" size={13} />
+                </span>
+                <span className="text-[14px] font-semibold text-ink">{b.title}</span>
+              </div>
+              <div className="mt-0.5 text-[11.5px] text-faint">
+                Target: <span className="text-ink font-medium">{b.goal}</span> · Recommended Timeline: <span className="text-accent font-medium">{b.timeline}</span>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => onSend(`create a goal to prepare for ${b.goal}`)}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-accent/40 bg-accent px-3 py-1.5 text-[11.5px] font-medium text-white shadow-sm transition hover:brightness-110 glow-accent"
+            >
+              <Icon name="goals" size={12} /> Add as active goal in Orbit
+            </button>
+          </div>
+
+          <div>
+            <div className="mb-2 text-[10.5px] font-semibold uppercase tracking-wider text-faint">
+              Structured Roadmap (Phases)
+            </div>
+            <div className="grid gap-2 sm:grid-cols-3">
+              {b.phases.map((ph, idx) => (
+                <div key={idx} className="rounded-lg border border-line/70 bg-bg/50 p-2.5">
+                  <div className="flex items-center justify-between text-[11px]">
+                    <span className="font-semibold text-accent">{ph.name}</span>
+                    <span className="text-faint font-mono text-[10px]">{ph.duration}</span>
+                  </div>
+                  <p className="mt-1 text-[11.5px] leading-snug text-muted">{ph.focus}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <div className="mb-2 text-[10.5px] font-semibold uppercase tracking-wider text-faint">
+              Recommended Subtasks Checklist
+            </div>
+            <div className="space-y-1.5 overflow-hidden rounded-lg border border-line/70 bg-bg/40 p-2">
+              {b.subtasks.map((st, i) => (
+                <div key={i} className="flex items-center gap-2.5 text-[12px] py-1 border-b border-line/40 last:border-0">
+                  <StatusDot tone={st.status === "done" ? "ok" : st.status === "in_progress" ? "warn" : "info"} />
+                  <span className="text-ink flex-1">{st.title}</span>
+                  {st.weight && <Badge tone="muted" className="text-[10px]">{st.weight}</Badge>}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <div className="mb-2 flex items-center justify-between">
+              <span className="text-[10.5px] font-semibold uppercase tracking-wider text-faint">
+                Curated Video Lectures & Study Sources
+              </span>
+              <span className="text-[10.5px] text-accent">Direct YouTube links ↗</span>
+            </div>
+            <div className="space-y-2">
+              {b.resources.map((res, i) => (
+                <a
+                  key={i}
+                  href={res.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="group flex items-start justify-between gap-3 rounded-lg border border-line/70 bg-surface/80 p-2.5 transition hover:border-accent/40 hover:bg-white/[0.04]"
+                >
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[13px] font-medium text-ink group-hover:text-accent transition">
+                        {res.title}
+                      </span>
+                      <Badge tone="accent">{res.channel}</Badge>
+                    </div>
+                    <p className="mt-0.5 text-[11.5px] text-faint leading-relaxed">{res.why}</p>
+                  </div>
+                  <span className="shrink-0 rounded-md border border-line px-2 py-1 text-[11px] font-medium text-muted group-hover:text-ink">
+                    Watch ↗
+                  </span>
+                </a>
+              ))}
+            </div>
+          </div>
         </div>
       );
     case "events":
@@ -480,16 +602,32 @@ export default function Chat({ initialMessages }: { initialMessages: Msg[] }) {
                   openInExplorer: true,
                 }),
               }).catch(() => {});
-            } else if (blk.action.type === "mail") {
-              fetch("http://127.0.0.1:38291/mail", {
+            } else if (blk.action.type === "music") {
+              if (blk.action.payload?.url) {
+                window.open(blk.action.payload.url, "_blank");
+              }
+              fetch("http://127.0.0.1:38291/play", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
-                  to: blk.action.payload.to,
-                  subject: blk.action.payload.subject,
-                  body: blk.action.payload.body,
+                  song: blk.action.payload?.song,
+                  url: blk.action.payload?.url,
                 }),
               }).catch(() => {});
+            } else if (blk.action.type === "mail") {
+              // Never pop up compose draft if sent is true or direct send
+              if (blk.action.payload?.openCompose && !blk.action.payload?.sent) {
+                fetch("http://127.0.0.1:38291/mail", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    to: blk.action.payload.to,
+                    subject: blk.action.payload.subject,
+                    body: blk.action.payload.body,
+                    openInBrowser: true,
+                  }),
+                }).catch(() => {});
+              }
             }
           }
         }

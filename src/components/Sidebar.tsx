@@ -43,8 +43,17 @@ const GROUPS: { label: string; items: { href: string; icon: string; label: strin
   },
 ];
 
-export default function Sidebar({ approvals, notifications }: { approvals: number; notifications: number }) {
+export default function Sidebar({
+  approvals,
+  notifications,
+  userName = "Aarav",
+}: {
+  approvals: number;
+  notifications: number;
+  userName?: string;
+}) {
   const path = usePathname();
+  const initialLetter = (userName.trim()[0] || "U").toUpperCase();
   return (
     <aside className="fixed inset-y-0 left-0 z-40 hidden w-[236px] flex-col border-r border-line bg-surface/60 backdrop-blur-sm md:flex">
       <div className="flex items-center gap-2.5 px-5 pb-4 pt-5">
@@ -98,8 +107,8 @@ export default function Sidebar({ approvals, notifications }: { approvals: numbe
           <ResetDemoButton variant="compact" />
         </div>
         <div className="flex items-center gap-2 text-[12px] text-muted">
-          <span className="grid h-6 w-6 place-items-center rounded-full bg-accent-soft text-[10px] font-semibold text-accent">A</span>
-          Aarav · COET Coimbatore
+          <span className="grid h-6 w-6 place-items-center rounded-full bg-accent-soft text-[10px] font-semibold text-accent">{initialLetter}</span>
+          <span className="truncate">{userName} · COET</span>
         </div>
       </div>
     </aside>

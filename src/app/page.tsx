@@ -2,7 +2,7 @@ import { and, desc, eq, gte, lte } from "drizzle-orm";
 import Link from "next/link";
 import { db } from "@/db";
 import {
-  approvals, calendarEvents, chatMessages, emailItems, goals, tasks,
+  approvals, calendarEvents, chatMessages, emailItems, goals, profiles, tasks,
 } from "@/db/schema";
 import Chat from "@/components/Chat";
 import { Badge, Card, DemoTag, Icon, Progress, RiskBadge, StatusDot } from "@/components/ui";
@@ -14,10 +14,12 @@ const fmtTime = (d: Date) => d.toLocaleTimeString("en-IN", { hour: "numeric", mi
 
 export default async function Home() {
   const now = new Date();
-  const [msgs, dayStart] = await Promise.all([
+  const [msgs, dayStart, [pRow]] = await Promise.all([
     db.select().from(chatMessages).orderBy(chatMessages.createdAt).limit(40),
     (async () => { const d = new Date(now); d.setHours(0, 0, 0, 0); return d; })(),
+    db.select().from(profiles).where(eq(profiles.id, "u1")),
   ]);
+  const userName = pRow?.name || "there";
   const dayEnd = new Date(now);
   dayEnd.setHours(23, 59, 59, 999);
 
@@ -39,7 +41,7 @@ export default async function Home() {
       <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
         <div>
           <div className="flex items-center gap-2.5">
-            <h1 className="font-display text-[24px] font-semibold tracking-tight text-ink">{greeting}, Aarav</h1>
+            <h1 className="font-display text-[24px] font-semibold tracking-tight text-ink">{greeting}, {userName}</h1>
             <DemoTag />
           </div>
           <p className="mt-0.5 text-[13px] text-muted">

@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { Space_Grotesk, Instrument_Sans, JetBrains_Mono } from "next/font/google";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { approvals, notifications } from "@/db/schema";
+import { approvals, notifications, profiles } from "@/db/schema";
 import "./globals.css";
 import Sidebar from "@/components/Sidebar";
 import MobileNav from "@/components/MobileNav";
@@ -20,14 +20,17 @@ export const metadata: Metadata = {
 };
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
-  const [pending, unread] = await Promise.all([
+  const [pending, unread, [userProfile]] = await Promise.all([
     db.select().from(approvals).where(eq(approvals.status, "pending")),
     db.select().from(notifications).where(eq(notifications.read, false)),
+    db.select().from(profiles).where(eq(profiles.id, "u1")),
   ]);
+  const userName = userProfile?.name || "Aarav";
+
   return (
     <html lang="en" className={`${display.variable} ${body.variable} ${mono.variable}`}>
       <body className="font-body antialiased">
-        <Sidebar approvals={pending.length} notifications={unread.length} />
+        <Sidebar approvals={pending.length} notifications={unread.length} userName={userName} />
         <div className="min-h-screen md:pl-[236px]">
           <main className="mx-auto w-full max-w-[1280px] px-4 pb-24 pt-5 md:px-8 md:pb-10 md:pt-7">{children}</main>
         </div>
