@@ -1,6 +1,7 @@
 node_modules
 .next
 out
+dist
 .env
 .env.*
 !.env.example
@@ -17,6 +18,3 @@ netlify_site
 apis.md
 apis.local.md
 .vercel
-
-.vercel
-.env*

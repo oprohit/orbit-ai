@@ -201,8 +201,31 @@ export async function runTool(toolId: string, params: Record<string, any>, _ctx?
       };
     }
 
-    /* ── Desktop Agent (sandboxed local companion) ─────── */
+    /* ── Desktop Agent (live local companion + fallback) ─────── */
     case "filesystem.scan": {
+      try {
+        const agentRes = await fetch("http://127.0.0.1:38291/scan", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ target: params.target || "downloads" }),
+          signal: AbortSignal.timeout(3500),
+        });
+        if (agentRes.ok) {
+          const liveData = (await agentRes.json()) as any;
+          return {
+            ok: true,
+            summary: liveData.summary || `Live Scan: ${liveData.fileCount} files (${liveData.totalFormatted})`,
+            data: {
+              live: true,
+              scannedPath: liveData.scannedPath,
+              total: liveData.totalFormatted,
+              fileCount: liveData.fileCount,
+              largeFiles: liveData.largeFiles || [],
+            },
+          };
+        }
+      } catch {}
+
       return {
         ok: true,
         summary: "Scan complete — 4.3 GB reclaimable",

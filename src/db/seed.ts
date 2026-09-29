@@ -30,7 +30,7 @@ async function wipe() {
   for (const t of tables) await db.delete(t);
 }
 
-async function main() {
+export async function seedDemo() {
   await wipe();
   const now = new Date();
 
@@ -377,10 +377,13 @@ async function main() {
     connectors: conns.length, tools: tools.length, skills: 8, plugins: 4,
     mcp: 4, goals: 2, tasks: tasks.length, transactions: txns.length,
   });
-  process.exit(0);
 }
 
-main().catch((e) => {
-  console.error("SEED FAILED", e);
-  process.exit(1);
-});
+if (process.argv[1]?.includes("seed")) {
+  seedDemo()
+    .then(() => process.exit(0))
+    .catch((e) => {
+      console.error("SEED FAILED", e);
+      process.exit(1);
+    });
+}

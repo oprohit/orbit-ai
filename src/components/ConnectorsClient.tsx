@@ -112,7 +112,17 @@ export default function ConnectorsClient({ connectors }: { connectors: Connector
                           {c.status === "connected" ? (
                             <Btn size="sm" variant="danger" disabled={busy === `${c.id}-disconnect`} onClick={() => void act(c.id, "disconnect")}>Revoke access</Btn>
                           ) : c.status === "available" ? (
-                            <Btn size="sm" variant="primary" disabled={busy === `${c.id}-connect`} onClick={() => void act(c.id, "connect")}>Connect (demo OAuth)</Btn>
+                            <>
+                              <Btn size="sm" variant="primary" disabled={busy === `${c.id}-connect`} onClick={() => void act(c.id, "connect")}>Connect (demo)</Btn>
+                              {c.id === "gmail" && (
+                                <a
+                                  href="/api/auth/google"
+                                  className="inline-flex items-center gap-1.5 rounded-lg border border-accent/40 bg-accent/15 px-3 py-1 text-[11.5px] font-medium text-accent hover:bg-accent/25"
+                                >
+                                  Connect Live Google Gmail
+                                </a>
+                              )}
+                            </>
                           ) : (
                             <Badge tone="warn">action not available</Badge>
                           )}

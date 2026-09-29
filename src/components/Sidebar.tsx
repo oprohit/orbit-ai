@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import ResetDemoButton from "@/components/ResetDemoButton";
 import { usePathname } from "next/navigation";
 import { Icon } from "./ui";
 
@@ -89,11 +90,14 @@ export default function Sidebar({ approvals, notifications }: { approvals: numbe
         ))}
       </nav>
 
-      <div className="border-t border-line px-4 py-3.5">
-        <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-wider text-warn">
-          <span className="h-1.5 w-1.5 rounded-full bg-warn pulse-warn" /> Demo mode — simulated connectors
+      <div className="border-t border-line px-4 py-3.5 space-y-2.5">
+        <div className="flex items-center justify-between gap-1.5">
+          <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-warn">
+            <span className="h-1.5 w-1.5 rounded-full bg-warn pulse-warn" /> Demo mode
+          </div>
+          <ResetDemoButton variant="compact" />
         </div>
-        <div className="mt-1.5 flex items-center gap-2 text-[12px] text-muted">
+        <div className="flex items-center gap-2 text-[12px] text-muted">
           <span className="grid h-6 w-6 place-items-center rounded-full bg-accent-soft text-[10px] font-semibold text-accent">A</span>
           Aarav · COET Coimbatore
         </div>
