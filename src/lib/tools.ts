@@ -443,6 +443,36 @@ export async function runTool(toolId: string, params: Record<string, any>, _ctx?
       if (!song || song.length < 2) song = rawSong || "relaxing music";
 
       let resolvedVideoId: string | null = null;
+
+      const KNOWN_TRACKS: Record<string, string> = {
+        "one change": "syFZfO_wfMQ",
+        "night changes": "syFZfO_wfMQ",
+        "one chance": "v-2pFCiIkPQ",
+        "lofi": "jfKfPfyJRdk",
+        "lofi hip hop": "jfKfPfyJRdk",
+        "lofi hip-hop": "jfKfPfyJRdk",
+        "relaxing music": "jfKfPfyJRdk",
+        "study music": "jfKfPfyJRdk",
+        "acoustic guitar": "s49CT448ph4",
+        "starboy": "34Na4j8AVgA",
+        "blinding lights": "4NRXx6U8ABQ",
+        "despacito": "kJQP7kiw5Fk",
+        "shape of you": "JGwWNGJdvx8",
+        "die with a smile": "kPa7bsKwL-8",
+        "espresso": "eVli-tstM5E",
+        "maro maro": "5w93BBx5Pf8",
+        "chuttamalle": "Gv_pA_uGkG0",
+        "fear song": "1p_eN66K0u8",
+        "devara": "1p_eN66K0u8",
+        "believer": "7wtfhZwyrcc",
+        "faded": "60ItHLz5WEA",
+      };
+
+      const norm = song.toLowerCase().trim();
+      if (KNOWN_TRACKS[norm]) {
+        resolvedVideoId = KNOWN_TRACKS[norm];
+      }
+
       const headers = {
         "Content-Type": "application/json",
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
