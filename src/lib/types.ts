@@ -24,7 +24,18 @@ export type Block =
       resources: { title: string; channel: string; duration: string; why: string; url: string }[];
     };
 
-export type ChatContent = { text: string; blocks?: Block[] };
+export type ChatContent = {
+  text: string;
+  blocks?: Block[];
+  attachment?: {
+    name: string;
+    type: string;
+    size: number;
+    dataUrl?: string;
+    isImage?: boolean;
+    extension?: string;
+  };
+};
 
 export type ToolRequest = { toolId: string; params: Record<string, unknown>; reason: string };
 

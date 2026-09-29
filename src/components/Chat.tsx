@@ -114,7 +114,25 @@ function ApprovalCard({ a, onDecide, busy }: { a: ApprovalRow; onDecide: (id: st
   );
 }
 
-function BlockView({ b, approvals, onDecide, busy, onSend }: { b: Block; approvals: Record<string, ApprovalRow>; onDecide: (id: string, d: "approved" | "denied", params?: Record<string, any>) => void; busy: boolean; onSend: (s: string) => void }) {
+function BlockView({
+  b,
+  approvals,
+  onDecide,
+  busy,
+  onSend,
+  onAddActiveGoal,
+  addedGoals,
+  addingGoal,
+}: {
+  b: Block;
+  approvals: Record<string, ApprovalRow>;
+  onDecide: (id: string, d: "approved" | "denied", params?: Record<string, any>) => void;
+  busy: boolean;
+  onSend: (s: string) => void;
+  onAddActiveGoal?: (b: Extract<Block, { type: "study_plan" }>) => void;
+  addedGoals?: Record<string, boolean>;
+  addingGoal?: string | null;
+}) {
   switch (b.type) {
     case "chips":
       return (
@@ -325,24 +343,17 @@ function BlockView({ b, approvals, onDecide, busy, onSend }: { b: Block; approva
           )}
           {b.action?.type === "music" && (
             <div className="mt-3 space-y-2.5 border-t border-line/60 pt-2.5">
-              {b.action?.payload?.videoId && (
-                <div className="relative overflow-hidden rounded-xl border border-line bg-black/60 shadow-lg">
-                  <div className="flex items-center justify-between border-b border-line/40 px-3 py-1.5 bg-black/40 text-[11px] text-muted">
-                    <span className="flex items-center gap-1.5 font-medium text-ink">
-                      <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
-                      Live Music Stream
-                    </span>
-                    <span className="text-[10px] text-muted">{b.action.payload.song}</span>
-                  </div>
-                  <iframe
-                    src={`https://www.youtube-nocookie.com/embed/${b.action.payload.videoId}?autoplay=1&enablejsapi=1`}
-                    title={b.action.payload.song || "Music Player"}
-                    className="h-[175px] w-full border-0"
-                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                    allowFullScreen
-                  />
+              <div className="flex items-center justify-between rounded-xl border border-line bg-surface/80 px-3.5 py-2.5 text-[12px]">
+                <div className="flex items-center gap-2">
+                  <span className="relative flex h-2.5 w-2.5">
+                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+                    <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-500" />
+                  </span>
+                  <span className="font-medium text-ink">{b.action.payload.song}</span>
+                  <span className="text-[11px] text-muted">· Direct autoplay in browser tab</span>
                 </div>
-              )}
+                <span className="text-[10.5px] font-mono text-faint">No in-app sound</span>
+              </div>
               <div className="flex flex-wrap items-center gap-2">
                 {b.action?.payload?.musicUrl && (
                   <a
@@ -406,13 +417,24 @@ function BlockView({ b, approvals, onDecide, busy, onSend }: { b: Block; approva
               >
                 <span>🎯</span> Open Task Breaker Flowchart (110 Steps)
               </button>
-              <button
-                type="button"
-                onClick={() => onSend(`create a goal to prepare for ${b.goal}`)}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-surface px-3 py-1.5 text-[11.5px] font-medium text-ink shadow-sm transition hover:bg-white/5"
-              >
-                <Icon name="goals" size={12} /> Add as active goal
-              </button>
+              {addedGoals?.[b.goal] ? (
+                <button
+                  type="button"
+                  disabled
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-ok/40 bg-ok/10 px-3 py-1.5 text-[11.5px] font-semibold text-ok shadow-sm cursor-default"
+                >
+                  <Icon name="check" size={12} /> Added to Active Goals
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  disabled={busy || addingGoal === b.goal}
+                  onClick={() => onAddActiveGoal?.(b)}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-surface px-3 py-1.5 text-[11.5px] font-medium text-ink shadow-sm transition hover:bg-white/5 disabled:opacity-50"
+                >
+                  <Icon name="goals" size={12} /> {addingGoal === b.goal ? "Adding to Goals…" : "Add as active goal in Orbit"}
+                </button>
+              )}
             </div>
           </div>
 
@@ -507,6 +529,76 @@ export default function Chat({ initialMessages }: { initialMessages: Msg[] }) {
   const [listening, setListening] = useState(false);
   const [speechSupported, setSpeechSupported] = useState(false);
   const [ttsEnabled, setTtsEnabled] = useState(false);
+  const [addedGoals, setAddedGoals] = useState<Record<string, boolean>>({});
+  const [addingGoal, setAddingGoal] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [attachment, setAttachment] = useState<{
+    name: string;
+    type: string;
+    size: number;
+    dataUrl?: string;
+    isImage?: boolean;
+    extension?: string;
+  } | null>(null);
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const isImage = file.type.startsWith("image/");
+    const ext = file.name.split(".").pop()?.toLowerCase() || "";
+    const reader = new FileReader();
+    reader.onload = () => {
+      setAttachment({
+        name: file.name,
+        type: file.type || "application/octet-stream",
+        size: file.size,
+        dataUrl: reader.result as string,
+        isImage,
+        extension: ext,
+      });
+    };
+    reader.readAsDataURL(file);
+    e.target.value = "";
+  };
+
+  const handleAddActiveGoal = async (b: Extract<Block, { type: "study_plan" }>) => {
+    if (addingGoal === b.goal || addedGoals[b.goal]) return;
+    setAddingGoal(b.goal);
+    try {
+      const res = await fetch("/api/mutate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "goal.create",
+          title: b.goal,
+          phases: b.phases,
+          subtasks: b.subtasks,
+          deadline: b.timeline,
+        }),
+      });
+      if (res.ok) {
+        setAddedGoals((prev) => ({ ...prev, [b.goal]: true }));
+        setMessages((ms) => [
+          ...ms,
+          {
+            id: `sys-${Date.now()}`,
+            role: "assistant",
+            content: {
+              text: `🎯 **"${b.goal}"** has been added as an **Active Goal** in your Orbit dashboard! Decomposed into ${b.phases?.length || 3} milestone phases and ${b.subtasks?.length || 6} preparation tasks. Check the **Goals** tab to track your progress.`,
+              blocks: [],
+            },
+            createdAt: new Date().toISOString(),
+          },
+        ]);
+        router.refresh();
+      }
+    } catch (e) {
+      console.error("Failed to create active goal:", e);
+    } finally {
+      setAddingGoal(null);
+    }
+  };
+
   const recognitionRef = useRef<any>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
@@ -608,17 +700,52 @@ export default function Chat({ initialMessages }: { initialMessages: Msg[] }) {
 
   const send = useCallback(async (raw: string) => {
     const text = raw.trim();
-    if (!text || busy) return;
+    const attachPayload = attachment;
+    if ((!text && !attachPayload) || busy) return;
     if (listening && recognitionRef.current) {
       try { recognitionRef.current.stop(); } catch {}
       setListening(false);
     }
-    const userMsg: Msg = { id: `u-${Date.now()}`, role: "user", content: { text }, createdAt: new Date().toISOString() };
+    const displayText = text || `Attached file: ${attachPayload?.name}`;
+    const userMsg: Msg = {
+      id: `u-${Date.now()}`,
+      role: "user",
+      content: { text: displayText, attachment: attachPayload || undefined },
+      createdAt: new Date().toISOString(),
+    };
     setMessages((ms) => [...ms, userMsg]);
     setInput("");
+    setAttachment(null);
     setBusy(true);
+
+    // Probe local desktop agent if user asks for pc/junk scan
+    let clientScan: any = null;
+    if (/(?:scan|junk|cleanup|clean\s+up|clean\s+my|check\s+(?:my\s+)?laptop|check\s+(?:my\s+)?pc|temp\s+files|free\s+up\s+space)/i.test(text)) {
+      try {
+        const scanRes = await fetch("http://127.0.0.1:38291/scan", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ target: "junk" }),
+          signal: AbortSignal.timeout(1500),
+        });
+        if (scanRes.ok) {
+          clientScan = await scanRes.json();
+        }
+      } catch {
+        // Desktop companion offline
+      }
+    }
+
     try {
-      const res = await fetch("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: text }) });
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message: text,
+          attachment: attachPayload || undefined,
+          clientScan,
+        }),
+      });
       const data = await res.json();
       if (data.assistant) {
         setMessages((ms) => [...ms, data.assistant]);
@@ -712,12 +839,28 @@ export default function Chat({ initialMessages }: { initialMessages: Msg[] }) {
                   <span className="text-[11px] font-semibold uppercase tracking-wider text-faint">Orbit</span>
                 </div>
               )}
+              {m.content.attachment && (
+                <div className={`mb-1.5 flex items-center gap-2 rounded-lg border border-accent/40 bg-accent/15 px-3 py-1.5 text-[12px] ${m.role === "user" ? "ml-auto w-fit" : "w-fit"}`}>
+                  <Icon name="paperclip" size={13} className="text-accent shrink-0" />
+                  <span className="font-medium text-ink truncate max-w-[220px]">{m.content.attachment.name}</span>
+                  <span className="text-[10px] text-faint font-mono">({Math.round(m.content.attachment.size / 1024)} KB)</span>
+                </div>
+              )}
               <div className={`fade-up rounded-xl px-3.5 py-2.5 text-[13.5px] leading-relaxed ${m.role === "user" ? "bg-accent-soft text-ink" : "text-ink"}`}>
                 {m.content.text}
               </div>
               {m.content.blocks?.map((b, i) => (
                 <div key={i} className="mt-2">
-                  <BlockView b={b} approvals={approvals} onDecide={decide} busy={busy} onSend={send} />
+                  <BlockView
+                    b={b}
+                    approvals={approvals}
+                    onDecide={decide}
+                    busy={busy}
+                    onSend={send}
+                    onAddActiveGoal={handleAddActiveGoal}
+                    addedGoals={addedGoals}
+                    addingGoal={addingGoal}
+                  />
                 </div>
               ))}
             </div>
@@ -756,18 +899,61 @@ export default function Chat({ initialMessages }: { initialMessages: Msg[] }) {
         </div>
       )}
 
+      {/* File Attachment Chip Preview */}
+      {attachment && (
+        <div className="fade-up mb-2 flex items-center justify-between rounded-xl border border-accent/40 bg-accent/10 px-3 py-2 text-[12px]">
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="grid h-6 w-6 place-items-center rounded bg-accent/20 text-accent shrink-0">
+              <Icon name="paperclip" size={13} />
+            </span>
+            <div className="min-w-0">
+              <div className="truncate font-medium text-ink">{attachment.name}</div>
+              <div className="text-[10.5px] text-faint">
+                {Math.round(attachment.size / 1024)} KB · {attachment.extension?.toUpperCase() || "File"}
+              </div>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setAttachment(null)}
+            className="rounded p-1 text-faint hover:bg-white/10 hover:text-ink transition ml-2"
+            title="Remove attachment"
+          >
+            <Icon name="x" size={13} />
+          </button>
+        </div>
+      )}
+
       <form
         className="mt-2 flex items-end gap-2 rounded-xl border border-line bg-surface p-2 focus-within:border-accent/40"
         onSubmit={(e) => { e.preventDefault(); void send(input); }}
       >
+        <input
+          type="file"
+          ref={fileInputRef}
+          onChange={handleFileChange}
+          accept=".pdf,.doc,.docx,.txt,.csv,.png,.jpg,.jpeg,.webp"
+          className="hidden"
+        />
+
         <textarea
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void send(input); } }}
           rows={1}
-          placeholder={listening ? "Listening... speak now" : 'Give it a goal — "What\'s important today?" · "Create a folder named Projects on desktop"'}
+          placeholder={listening ? "Listening... speak now" : attachment ? `Add instructions for ${attachment.name}...` : 'Give it a goal — "What\'s important today?" · "Create a folder named Projects on desktop"'}
           className="max-h-28 min-h-[38px] flex-1 resize-none bg-transparent px-2 py-1.5 text-[13.5px] text-ink placeholder:text-faint"
         />
+
+        {/* File Attachment Button */}
+        <button
+          type="button"
+          onClick={() => fileInputRef.current?.click()}
+          title="Attach PDF, document, or image"
+          className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-line bg-white/[0.04] text-muted hover:border-accent/40 hover:text-accent hover:bg-accent/10 transition"
+        >
+          <Icon name="paperclip" size={16} />
+        </button>
 
         {/* Voice Command Dictation Button */}
         <button
@@ -784,7 +970,11 @@ export default function Chat({ initialMessages }: { initialMessages: Msg[] }) {
         </button>
 
         {/* Send Button */}
-        <button type="submit" disabled={busy || !input.trim()} className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-accent text-white transition hover:brightness-110 disabled:opacity-30 glow-accent">
+        <button
+          type="submit"
+          disabled={busy || (!input.trim() && !attachment)}
+          className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-accent text-white transition hover:brightness-110 disabled:opacity-30 glow-accent"
+        >
           <Icon name="send" size={15} />
         </button>
       </form>

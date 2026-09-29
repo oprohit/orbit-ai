@@ -134,6 +134,132 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: "goal not found" }, { status: 404 });
       }
 
+      case "goal.create": {
+        const goalTitle = (b.title || b.goal || "New Strategic Goal").trim();
+        const goalId = b.id || randomUUID();
+        const deadline = b.deadline ? new Date(b.deadline) : new Date(Date.now() + 180 * 86400000);
+        const subtasksList = Array.isArray(b.subtasks) ? b.subtasks : [];
+        const phasesList = Array.isArray(b.phases) ? b.phases : [];
+        const targetValue = typeof b.targetValue === "number" ? b.targetValue : (subtasksList.length || 4);
+
+        // Check if goal with identical title already exists
+        const existingGoals = await db.select().from(goals).where(eq(goals.title, goalTitle));
+        if (existingGoals.length > 0 && existingGoals[0].status === "active") {
+          return NextResponse.json({ ok: true, goalId: existingGoals[0].id, title: goalTitle, alreadyActive: true });
+        }
+
+        // 1. Insert into goals table
+        await db.insert(goals).values({
+          id: goalId,
+          title: goalTitle,
+          description: b.description || `Active strategic goal: ${goalTitle}. Decomposed into structured milestone phases and scheduled preparation subtasks.`,
+          status: "active",
+          deadline,
+          targetValue,
+          currentValue: 0,
+          unit: b.unit || "tasks",
+          aiReasoning: b.aiReasoning || `Goal activated from research & study plan. Decomposed into milestone roadmap and scheduled tasks.`,
+          nextAction: b.nextAction || (subtasksList[0]?.title ?? "Begin Phase 1 foundations"),
+          sources: ["User Goal"],
+        });
+
+        // 2. Insert milestones into goalMilestones table
+        if (phasesList.length > 0) {
+          for (const [i, p] of phasesList.entries()) {
+            await db.insert(goalMilestones).values({
+              id: randomUUID(),
+              goalId,
+              title: p.name || p.title || `Phase ${i + 1}`,
+              detail: p.focus || p.detail || "",
+              seq: i,
+              status: i === 0 ? "in_progress" : "pending",
+            });
+          }
+        } else if (Array.isArray(b.milestones) && b.milestones.length > 0) {
+          for (const [i, m] of b.milestones.entries()) {
+            await db.insert(goalMilestones).values({
+              id: randomUUID(),
+              goalId,
+              title: typeof m === "string" ? m : m.title,
+              detail: typeof m === "object" ? m.detail || "" : "",
+              seq: i,
+              status: i === 0 ? "in_progress" : "pending",
+            });
+          }
+        } else {
+          // Default milestones for comprehensive goal
+          const defaultMs = [
+            ["Phase 1: High-Yield Foundations", "Core concepts, fundamental theory, and diagnostic baseline"],
+            ["Phase 2: Core Engineering & Systems", "In-depth problem solving, algorithms, and application"],
+            ["Phase 3: Topic-wise PYQs & Practice", "Solve previous questions and timed exercises"],
+            ["Phase 4: Full-Length Diagnostic Mocks", "Simulated mock assessments under exam conditions"],
+          ];
+          for (const [i, [title, detail]] of defaultMs.entries()) {
+            await db.insert(goalMilestones).values({
+              id: randomUUID(),
+              goalId,
+              title,
+              detail,
+              seq: i,
+              status: i === 0 ? "in_progress" : "pending",
+            });
+          }
+        }
+
+        // 3. Insert subtasks into tasks table with goalId
+        if (subtasksList.length > 0) {
+          for (const [i, st] of subtasksList.entries()) {
+            const taskDeadline = new Date(Date.now() + (i + 1) * 3 * 86400000);
+            await db.insert(tasks).values({
+              id: randomUUID(),
+              goalId,
+              title: typeof st === "string" ? st : st.title,
+              priority: (typeof st === "object" && st.weight?.toLowerCase()?.includes("crucial")) || i === 0 ? "high" : "medium",
+              status: "inbox",
+              deadline: taskDeadline,
+              source: "Goal Subtask",
+            });
+          }
+        } else {
+          // Default subtasks if none passed
+          const defaultTasks = [
+            { title: `Download official ${goalTitle} syllabus & create weightage matrix`, priority: "high", days: 1 },
+            { title: `Complete curated introductory foundational lecture series`, priority: "high", days: 3 },
+            { title: `Solve last 15 years topic-wise previous year questions (PYQs)`, priority: "high", days: 5 },
+            { title: `Attempt full-length timed diagnostic mocks`, priority: "high", days: 7 },
+          ];
+          for (const t of defaultTasks) {
+            await db.insert(tasks).values({
+              id: randomUUID(),
+              goalId,
+              title: t.title,
+              priority: t.priority,
+              status: "inbox",
+              deadline: new Date(Date.now() + t.days * 86400000),
+              source: "Goal Subtask",
+            });
+          }
+        }
+
+        await db.insert(notifications).values({
+          id: randomUUID(),
+          kind: "goal_milestone",
+          title: `Goal Activated: ${goalTitle}`,
+          body: `Added to your Active Goals board with milestones and subtasks.`,
+          read: false,
+          link: "/goals",
+        });
+
+        await logAudit({
+          action: `goal.created — ${goalTitle}`,
+          goalId,
+          authorization: "allowed",
+          resultSummary: `Active goal created with milestones and subtasks`,
+        });
+
+        return NextResponse.json({ ok: true, goalId, title: goalTitle });
+      }
+
       case "task.create": {
         if (!b.title) return NextResponse.json({ error: "title required" }, { status: 400 });
         const res = await execTool("task.create", { title: b.title, description: b.description ?? null, priority: b.priority ?? "medium", deadline: b.deadline ?? null, status: "inbox", source: "User" }, { reason: "Manual task from UI" });

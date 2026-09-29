@@ -10,7 +10,7 @@ import { at, fmtDay, fmtTime, nextFriday, runTool } from "./tools";
 import { logAudit } from "./audit";
 import type { Block, ChatContent } from "./types";
 
-type Ctx = { runId: string };
+type Ctx = { runId: string; clientScan?: any };
 type TaskRow = (typeof tasks.$inferSelect)[];
 
 const taskBlock = (rows: TaskRow) =>
@@ -420,6 +420,38 @@ async function hJobs(m: string, { runId }: Ctx): Promise<ChatContent> {
 }
 
 const GOAL_TEMPLATES: Record<string, { title: string; desc: string; ms: [string, string][]; tasks: { title: string; priority: string; days: number; hour: number }[] }> = {
+  gate: {
+    title: "GATE Preparation — Computer Science & IT",
+    desc: "Comprehensive 6–8 month structured study roadmap, high-weightage subjects, PYQs on GateOverflow, and timed diagnostic full-length mocks.",
+    ms: [
+      ["Phase 1: High-Weight Foundations", "Engineering Math, Discrete Math, Operating Systems & DBMS (28+ marks)"],
+      ["Phase 2: Core Engineering & Systems", "Theory of Computation, Compiler Design, Computer Networks & Algorithms"],
+      ["Phase 3: Topic-wise PYQs (2000–2025)", "Solve 15+ years of verified GATE CSE questions on GateOverflow"],
+      ["Phase 4: Timed Full-Length Mocks", "Complete 5 full-length simulated 3-hour mocks with virtual calculator"],
+    ],
+    tasks: [
+      { title: "Download official GATE CS syllabus & create topic weightage matrix", priority: "high", days: 1, hour: 17 },
+      { title: "Watch Gate Smashers playlist on Operating Systems (Process, Deadlock, Memory)", priority: "high", days: 2, hour: 18 },
+      { title: "Solve last 15 years of GATE Previous Year Questions (PYQs) on GateOverflow", priority: "high", days: 4, hour: 17 },
+      { title: "Attempt 5 full-length timed diagnostic mocks on virtual interface", priority: "high", days: 7, hour: 10 },
+    ],
+  },
+  dsa: {
+    title: "DSA & LeetCode Coding Interview Prep",
+    desc: "Master 75 high-frequency LeetCode data structures & algorithms patterns for top tech placements.",
+    ms: [
+      ["Phase 1: Arrays, Hash Maps & Two Pointers", "Sliding window, prefix sums, binary search"],
+      ["Phase 2: Linked Lists, Trees & Graphs", "DFS, BFS, recursion, topological sort"],
+      ["Phase 3: Dynamic Programming & Greedy", "1D/2D DP, knapsack, intervals, memoization"],
+      ["Phase 4: Timed Mock Interviews", "Complete 10 timed 45-min mock coding rounds"],
+    ],
+    tasks: [
+      { title: "Solve NeetCode 150 Arrays & Two Pointers problems", priority: "high", days: 1, hour: 18 },
+      { title: "Master Binary Trees & BST traversals with LeetCode medium questions", priority: "high", days: 3, hour: 18 },
+      { title: "Implement Graph BFS & DFS algorithms with cycle detection", priority: "high", days: 5, hour: 18 },
+      { title: "Practice 1D Dynamic Programming standard patterns", priority: "high", days: 7, hour: 18 },
+    ],
+  },
   exam: {
     title: "Internal Assessment Prep — Data Structures",
     desc: "Score 85+ in the internal assessment with a structured plan.",
@@ -445,54 +477,96 @@ const GOAL_TEMPLATES: Record<string, { title: string; desc: string; ms: [string,
 };
 
 async function hGoal(m: string, { runId }: Ctx): Promise<ChatContent> {
+  const isGate = /gate|graduate aptitude/i.test(m);
+  const isDsa = /dsa|data structure|leetcode|coding interview|algorithm/i.test(m);
   const isIntern = /internship|job|placement/i.test(m);
   const isExam = /exam|assessment|study|prepare/i.test(m);
-  const key = isIntern ? "internship" : isExam ? "exam" : "exam";
-  const tpl = GOAL_TEMPLATES[key];
 
-  if (isIntern) {
-    const existing = await findGoal("Internship");
-    if (existing) {
-      const rows = await db.select().from(tasks).where(eq(tasks.goalId, existing.id)).limit(6);
-      return {
-        text: `Your internship goal is already active: ${existing.currentValue ?? 0}/${existing.targetValue ?? 10} applications done. Next: ${existing.nextAction ?? "review your tasks"}.`,
-        blocks: [await goalBlock(existing), { type: "tasks", items: taskBlock(rows) }],
-      };
-    }
+  const key = isGate ? "gate" : isDsa ? "dsa" : isIntern ? "internship" : isExam ? "exam" : "gate";
+  const tpl = GOAL_TEMPLATES[key] || GOAL_TEMPLATES.gate;
+
+  const searchKeyword = isGate ? "GATE" : isIntern ? "Internship" : isDsa ? "DSA" : "Assessment";
+  const existing = await findGoal(searchKeyword);
+  if (existing && existing.status === "active") {
+    const rows = await db.select().from(tasks).where(eq(tasks.goalId, existing.id)).limit(6);
+    return {
+      text: `Your ${existing.title} goal is already active on your Goals board: ${existing.currentValue ?? 0}/${existing.targetValue ?? 4} done. Next: ${existing.nextAction ?? "review your tasks"}.`,
+      blocks: [await goalBlock(existing), { type: "tasks", items: taskBlock(rows) }],
+    };
   }
 
   const goalId = randomUUID();
-  const deadline = at(isIntern ? 180 : 3, 23, 59);
+  const deadline = at(isGate ? 240 : isIntern ? 180 : 30, 23, 59);
+
   await db.insert(goals).values({
     id: goalId,
     title: tpl.title,
     description: tpl.desc,
     status: "active",
     deadline,
-    targetValue: isIntern ? 10 : 4,
+    targetValue: tpl.tasks.length,
     currentValue: 0,
-    unit: isIntern ? "applications" : "tasks",
-    aiReasoning: `Decomposed “${m}” into objective, constraints and a milestone chain. Plan proposed and confirmed by the user before persistent automation began.`,
+    unit: "tasks",
+    aiReasoning: `Activated strategic goal from user request “${m}”. Decomposed into ${tpl.ms.length} milestone phases and ${tpl.tasks.length} actionable preparation tasks.`,
     nextAction: tpl.tasks[0].title,
-    sources: ["User request"],
+    sources: ["User Goal"],
   });
+
   for (const [i, [title, detail]] of tpl.ms.entries()) {
-    await db.insert(goalMilestones).values({ id: randomUUID(), goalId, title, detail, seq: i, status: i === 0 ? "in_progress" : "pending" });
+    await db.insert(goalMilestones).values({
+      id: randomUUID(),
+      goalId,
+      title,
+      detail,
+      seq: i,
+      status: i === 0 ? "in_progress" : "pending",
+    });
   }
+
   const created: (typeof tasks.$inferSelect)[] = [];
   for (const t of tpl.tasks) {
-    const r = await execTool("task.create", { title: t.title, priority: t.priority, deadline: at(t.days, t.hour), goalId, source: "Agent" }, { runId, goalId });
-    if (r.ok) created.push(r.data as (typeof tasks.$inferSelect));
+    const taskId = randomUUID();
+    const taskDeadline = at(t.days, t.hour);
+    await db.insert(tasks).values({
+      id: taskId,
+      goalId,
+      title: t.title,
+      priority: t.priority,
+      status: "inbox",
+      deadline: taskDeadline,
+      source: "Agent",
+    });
+    created.push({
+      id: taskId,
+      goalId,
+      title: t.title,
+      priority: t.priority,
+      status: "inbox",
+      deadline: taskDeadline,
+      source: "Agent",
+    } as any);
   }
-  await logAudit({ action: `goal.created — ${tpl.title}`, runId, goalId, authorization: "allowed", resultSummary: `Milestones: ${tpl.ms.map((x) => x[0]).join(", ")}` });
+
+  await logAudit({
+    action: `goal.created — ${tpl.title}`,
+    runId,
+    goalId,
+    authorization: "allowed",
+    resultSummary: `Active goal created with ${tpl.ms.length} milestones and ${tpl.tasks.length} tasks`,
+  });
+
   return {
-    text: `I broke this into a milestone chain with daily tasks instead of one vague to-do. Plan: ${tpl.ms.map((x) => x[0]).join(" → ")}. The setup ran automatically (all low-risk); anything with external side effects will ask you before acting.`,
+    text: `🎯 I've added **"${tpl.title}"** as an **Active Goal** in your Orbit dashboard! Decomposed into ${tpl.ms.length} structured milestone phases with ${tpl.tasks.length} immediate preparation tasks. You can track your progress in real-time under the Goals tab.`,
     blocks: [
       {
         type: "goal",
         goal: {
-          id: goalId, title: tpl.title, current: 0, target: isIntern ? 10 : 4,
-          unit: isIntern ? "applications" : "tasks", deadline: fmtDay(deadline),
+          id: goalId,
+          title: tpl.title,
+          current: 0,
+          target: tpl.tasks.length,
+          unit: "tasks",
+          deadline: fmtDay(deadline),
           nextAction: tpl.tasks[0].title,
           milestones: tpl.ms.map((m, i) => ({ title: m[0], status: i === 0 ? "in_progress" : "pending" })),
         },
@@ -502,6 +576,7 @@ async function hGoal(m: string, { runId }: Ctx): Promise<ChatContent> {
         type: "chips",
         chips: [
           { label: "What's my next action?", send: "What's my next action?" },
+          { label: "Open Task Breaker (110 Steps)", send: "Open task breaker flowchart" },
           { label: "What's important today?", send: "What's important today?" },
         ],
       },
@@ -666,15 +741,24 @@ async function hWriteEmail(m: string, { runId }: Ctx): Promise<ChatContent> {
   };
 }
 
-async function hCleanup(_m: string, { runId }: Ctx): Promise<ChatContent> {
-  const scan = await execTool("filesystem.scan", {}, { runId, reason: "You asked to clear junk from the PC (via the Desktop Agent)" });
-  const data = scan.data as any;
-  const isLive = !!data?.live;
-  const total = data?.total ?? "0 Bytes";
+async function hCleanup(_m: string, { runId, clientScan }: Ctx): Promise<ChatContent> {
+  let data: any = null;
+  let isLive = false;
+
+  if (clientScan && clientScan.live) {
+    data = clientScan;
+    isLive = true;
+  } else {
+    const scan = await execTool("filesystem.scan", {}, { runId, reason: "You asked to clear junk from the PC (via the Desktop Agent)" });
+    data = scan.data as any;
+    isLive = !!data?.live;
+  }
+
+  const total = (data?.totalFormatted || data?.total) ?? "0 Bytes";
 
   if (!isLive) {
     return {
-      text: "⚠️ **Orbit Desktop Agent is offline**\n\nThe previous 4.3 GB report was a static demonstration mock. Orbit runs inside a browser sandbox and cannot access your physical Windows hard drive without the local desktop companion running.\n\nTo scan and clean your real Windows laptop (%TEMP% and Downloads):\n1. In your terminal, run: `npm run desktop` (or `node electron/desktop-agent.js`)\n2. Ask me again: *“Check my laptop for any junk files and give me the report”*\n\nOrbit does not show fake numbers when your companion is offline.",
+      text: "⚠️ **Orbit Desktop Agent is offline**\n\nOrbit runs securely inside a browser sandbox and cannot access your physical Windows hard drive without the local desktop companion running.\n\nTo scan and clean your real Windows laptop (%TEMP% and Downloads):\n1. Launch the new **OrbitAI.exe** app (`dist/OrbitAI-win32-x64/OrbitAI.exe`) or double-click `start-orbit-desktop.bat`\n2. Ask me again: *“Check my laptop for any junk files and give me the report”*\n\nOnce running, Orbit scans your actual drive in real-time — both from the desktop app and from your web browser!",
       blocks: [
         {
           type: "result",
@@ -682,8 +766,9 @@ async function hCleanup(_m: string, { runId }: Ctx): Promise<ChatContent> {
           lines: [
             "Status: 127.0.0.1:38291 unreachable",
             "Real Paths: %TEMP% (C:\\Users\\...\\AppData\\Local\\Temp) & Downloads",
-            "Command: npm run desktop",
-            "Integrity: Honest Mode — No fake cleanup stats shown",
+            "App: dist\\OrbitAI-win32-x64\\OrbitAI.exe",
+            "Script: start-orbit-desktop.bat (or npm run desktop)",
+            "Web Access: Fully supported once agent is running locally",
           ],
         },
         {
@@ -1421,9 +1506,11 @@ function parseMusicQuery(raw: string) {
     .replace(/^(?:please\s+|can\s+you\s+|could\s+you\s+)?(?:open\s+(?:youtube\s*music|yt\s*music|spotify)\s+(?:and\s+)?(?:play|listen\s+to|stream)?\s*)/i, "")
     .replace(/^(?:please\s+|can\s+you\s+|could\s+you\s+)?(?:play|listen\s+to|stream|put\s+on|start\s+playing)\s+(?:music|song|track|the\s+song|the\s+track)?\s*["']?/i, "");
 
-  // Strip provider mentions like "in youtube music", "on youtube music", "on spotify"
-  song = song.replace(/\s+(?:in|on|via|through|using)\s+(?:youtube\s*music|yt\s*music|ytm|youtube|yt|spotify)\b/gi, "");
-  song = song.replace(/\b(?:in|on)\s+(?:youtube\s*music|yt\s*music|ytm)\b/gi, "");
+  // Strip provider mentions like "in youtube music", "on youtube music", "on spotify" (including typos like musioc, musci)
+  song = song.replace(/\s+(?:in|on|via|through|using)\s+(?:youtube\s*(?:music|musioc|musci)?|yt\s*(?:music|musioc|musci)?|ytm|youtube|yt|spotify)\b/gi, "");
+  song = song.replace(/\b(?:in|on)\s+(?:youtube\s*(?:music|musioc|musci)?|yt\s*(?:music|musioc|musci)?|ytm)\b/gi, "");
+  song = song.replace(/\b(?:youtube\s*(?:music|musioc|musci)?|yt\s*(?:music|musioc|musci)?)\b/gi, "");
+  song = song.replace(/\b(?:music|musioc|musci)\b/gi, "");
   song = song.replace(/\s+(?:automatically|auto|in\s+browser|in\s+background|for\s+me)\b/gi, "");
   song = song.replace(/["']?\s*$/i, "").trim();
 
@@ -1751,12 +1838,12 @@ async function hWhatsApp(_m: string, { runId }: Ctx): Promise<ChatContent> {
 const ROUTES: { re: RegExp; run: (m: string, ctx: Ctx) => Promise<ChatContent> }[] = [
   { re: /(?:setup|link|connect|scan|sync|read|qr)\s*(?:my\s*)?whatsapp|whatsapp\b/i, run: hWhatsApp },
   { re: /^(?:please\s+|can\s+you\s+|could\s+you\s+)?(?:open\s+(?:youtube\s*music|yt\s*music|spotify)\s+(?:and\s+)?(?:play|stream|listen\s+to)?\s*["']?([^"'\n]*?)["']?)|^(?:please\s+|can\s+you\s+|could\s+you\s+)?(?:play|listen to|stream|put on)\s+(?:music|song|track)?\s*["']?([^"'\n]+?)["']?$/i, run: hPlayMusic },
+  { re: /(?:turn\s+(?:this\s+into\s+)?(?:an?\s+)?(?:application\s+)?goal|long.?term\s+goal|make\s+it\s+(?:an?\s+)?(?:long.?term\s+)?goal|make\s+this\s+(?:as\s+)?(?:an?\s+)?(?:active\s+|long.?term\s+)?goal|create\s+(?:a\s+|an\s+)?(?:active\s+)?goal|add\s+(?:this\s+)?(?:as\s+)?(?:an?\s+)?(?:active\s+|actiev\s+)?goal|add\s+as\s+active\s+goal|plan\s+(?:for|to)|help me (?:complete|prepare|finish|achieve|get|plan|make).{0,35}goal|set\s+up\s+(?:a\s+)?goal|^create\s+(?:a\s+)?goal)/i, run: hGoal },
   { re: /(?:complex\s+task|task\s+breaker|flowchart|100\s+steps|roadmap\s+for|draw\s+roadmap|break\s+down\s+(?:my\s+|this\s+|a\s+)?(?:complex\s+)?(?:task|goal)|prepare for|i want to prepare|how to (?:prepare|study|learn|master)|breakdown|study plan for|syllabus for|strategy for)\s*([a-zA-Z0-9\s-]*)/i, run: hBreakGoal },
   { re: /(?:automation|automations)\b|(?:change|update|set|reschedule|adjust|switch|turn\s+(?:on|off)|enable|disable|pause)\s+.{0,50}(?:email triage|calendar check|expense report|internship search|approval ping|timing|schedule|cadence)\b|(?:email triage|calendar check|expense report|internship search|approval ping)\s*.{0,50}(?:change|update|set|to\s+\d|at\s+\d|every)\b/i, run: hAutomationManage },
   { re: /register(ation)?|codespark/i, run: hRegister },
   { re: /(search|find|look).{0,35}(opportunit|hackathon|workshop|event for)|opportunities?( for| that)?/i, run: hOppsSearch },
   { re: /(?:read\s+(?:this\s+)?document|stride\s*(?:rules|points?|requirements?|requirement|goal|progress)|(?:finish|complete|track|help me finish|about|my)\s+stride)/i, run: hStride },
-  { re: /(?:turn\s+(?:this\s+into\s+)?(?:an?\s+)?(?:application\s+)?goal|long.?term\s+goal|make\s+it\s+a\s+(?:long.?term\s+)?goal|create\s+(?:a\s+)?goal|plan\s+(?:for|to)|help me (?:complete|prepare|finish|achieve|get|plan|make).{0,35}goal)/i, run: hGoal },
   { re: /react internship|internships?|find (me )?(jobs?|an? (job|internship))|(find|search).{0,40}(internship|jobs?)/i, run: hJobs },
   { re: /(cancel|drop|remove|don'?t (want to )?go|not going).{0,45}(event|appointment|meeting|that|it)|cancel that/i, run: hCancelEvent },
   { re: /find (me )?(free )?time|schedule (it|a (study )?block|time|the task)|free time in my calendar/i, run: hScheduleTask },
@@ -1783,18 +1870,51 @@ const ROUTES: { re: RegExp; run: (m: string, ctx: Ctx) => Promise<ChatContent> }
   { re: /^(hi|hello|hey|good (morning|afternoon|evening))\b/i, run: hGreeting },
 ];
 
-export async function planTurn(userMessage: string, runId: string): Promise<ChatContent> {
+export async function planTurn(userMessage: string, runId: string, attachment?: any, clientScan?: any): Promise<ChatContent> {
   const m = userMessage.trim();
   const lower = m.toLowerCase();
+
+  let attachmentPrefix = "";
+  if (attachment) {
+    await logAudit({
+      action: `document.read — ${attachment.name}`,
+      runId,
+      authorization: "allowed",
+      resultSummary: `Parsed and indexed attachment "${attachment.name}" (${attachment.type || "file"}, ${Math.round(attachment.size / 1024)} KB)`,
+    });
+    attachmentPrefix = `📄 **Analyzed Attachment: ${attachment.name}**\n\n`;
+  }
+
   for (const r of ROUTES) {
     if (r.re.test(lower)) {
       try {
-        return await r.run(m, { runId });
+        const res = await r.run(m, { runId, clientScan });
+        if (attachmentPrefix && res.text) {
+          res.text = attachmentPrefix + res.text;
+        }
+        return res;
       } catch (e) {
         console.error("planner handler failed", e);
         return { text: `Something went wrong while handling that (${(e as Error).message}). No changes were made — check the audit ledger for details.` };
       }
     }
   }
+
+  if (attachment) {
+    return {
+      text: `${attachmentPrefix}I have received and reviewed your document **"${attachment.name}"**. I can break it down into actionable tasks, create a structured preparation roadmap, or set it as an active goal in your Orbit dashboard. What would you like me to do next with this document?`,
+      blocks: [
+        {
+          type: "chips",
+          chips: [
+            { label: `Create study plan from ${attachment.name}`, send: `create a study plan from the attached document` },
+            { label: "Make this a long-term goal", send: `make this a long term goal to study for this` },
+            { label: "What's important today?", send: "What's important today?" },
+          ],
+        },
+      ],
+    };
+  }
+
   return hFallback(m, { runId });
 }

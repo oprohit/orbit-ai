@@ -17,13 +17,16 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const message = typeof body?.message === "string" ? body.message.trim() : "";
-    if (!message) return NextResponse.json({ error: "message is required" }, { status: 400 });
+    const rawMessage = typeof body?.message === "string" ? body.message.trim() : "";
+    const attachment = body?.attachment;
+    const clientScan = body?.clientScan;
+    const message = rawMessage || (attachment ? `Attached file: ${attachment.name}` : "");
+    if (!message && !attachment) return NextResponse.json({ error: "message or attachment is required" }, { status: 400 });
 
-    const userMsg = toStoredMessage(randomUUID(), "user", { text: message.slice(0, 2000) }, null);
-    await db.insert(chatMessages).values({ id: userMsg.id, role: "user", content: { text: userMsg.content.text } });
+    const userMsg = toStoredMessage(randomUUID(), "user", { text: message.slice(0, 2000), attachment }, null);
+    await db.insert(chatMessages).values({ id: userMsg.id, role: "user", content: { text: userMsg.content.text, attachment: userMsg.content.attachment } as any });
 
-    const assistant = await runTurn(message);
+    const assistant = await runTurn(message, attachment, clientScan);
     return NextResponse.json({ user: userMsg, assistant });
   } catch (e) {
     console.error("chat error", e);

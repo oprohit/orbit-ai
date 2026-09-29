@@ -20,7 +20,7 @@ export type StoredMessage = {
  * OBSERVE → PLAN → VALIDATE → ASK/EXECUTE (per step, via policy engine) → VERIFY → LOG → CONTINUE
  * The planner may request tools only; the policy engine decides each one.
  */
-export async function runTurn(userMessage: string): Promise<StoredMessage> {
+export async function runTurn(userMessage: string, attachment?: any, clientScan?: any): Promise<StoredMessage> {
   const runId = randomUUID();
   const t0 = Date.now();
   const cfg = aiConfig();
@@ -33,13 +33,13 @@ export async function runTurn(userMessage: string): Promise<StoredMessage> {
     status: "running",
   });
   await logAudit({
-    action: "goal received",
+    action: attachment ? `file.uploaded — ${attachment.name}` : "goal received",
     runId,
     authorization: "allowed",
-    inputSummary: userMessage,
+    inputSummary: attachment ? `${userMessage} [Attached: ${attachment.name} (${attachment.type || "file"})]` : userMessage,
   });
 
-  const content = await planTurn(userMessage, runId);
+  const content = await planTurn(userMessage, runId, attachment, clientScan);
   const summary = content.text.slice(0, 200);
 
   await db.update(agentRuns).set({ intent: "planned", status: "completed", summary }).where(eq(agentRuns.id, runId));
