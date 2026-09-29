@@ -1,0 +1,9 @@
+dist
+node_modules
+.next
+android
+*.exe
+*.apk
+*.aab
+.git
+start-orbit-desktop.bat
