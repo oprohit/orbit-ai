@@ -1,8 +1,8 @@
-import { desc, eq, gte, like } from "drizzle-orm";
+import { asc, desc, eq, gte, like } from "drizzle-orm";
 import { randomUUID } from "crypto";
 import { db } from "@/db";
 import {
-  approvals, calendarEvents, emailItems, goalMilestones, goals, tasks,
+  approvals, automations, calendarEvents, emailItems, goalMilestones, goals, tasks,
 } from "@/db/schema";
 import { createApproval, execTool } from "./executor";
 import { llmReply } from "./ai";
@@ -592,6 +592,147 @@ async function hPayment(m: string, { runId }: Ctx): Promise<ChatContent> {
   };
 }
 
+async function hAutomationManage(m: string, { runId }: Ctx): Promise<ChatContent> {
+  const allAutos = await db.select().from(automations).orderBy(asc(automations.id));
+  const lower = m.toLowerCase();
+
+  // 1. Identify target automation
+  let target = allAutos.find((a) => lower.includes(a.name.toLowerCase()));
+  if (!target) {
+    if (/email|triage|mail|morning/i.test(m)) target = allAutos.find((a) => a.id === "auto-1");
+    else if (/calendar|agenda|evening/i.test(m)) target = allAutos.find((a) => a.id === "auto-2");
+    else if (/expense|spending|budget|sunday/i.test(m)) target = allAutos.find((a) => a.id === "auto-3");
+    else if (/internship|job|monday/i.test(m)) target = allAutos.find((a) => a.id === "auto-4");
+    else if (/approval|ping|alert|urgent/i.test(m)) target = allAutos.find((a) => a.id === "auto-5");
+  }
+
+  // 2. If just asking to list or view automations
+  if (!target || (/show|list|view|what\s+are/i.test(m) && !/change|set|update|reschedule|timing|time|scan|turn/i.test(m))) {
+    const lines = allAutos.map(
+      (a) => `• **${a.name}**: ${a.schedule} (${a.enabled ? "Active / Opted In" : "Paused"}) — ${a.actions}`
+    );
+    return {
+      text: `Here are your current automations and their active schedules:`,
+      blocks: [
+        {
+          type: "result",
+          title: "⚙️ Active Automations",
+          lines,
+        },
+        {
+          type: "chips",
+          chips: [
+            { label: "Morning email triage at 9am", send: "Change morning email triage automation to 9am" },
+            { label: "Evening calendar check at 7pm", send: "Change evening calendar check automation to 7pm" },
+            { label: "Sunday expense report at 8pm", send: "Change Sunday expense report to 8pm" },
+          ],
+        },
+      ],
+    };
+  }
+
+  // 3. Parse timing and schedule changes
+  const timeMatch =
+    m.match(/\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/i) ||
+    m.match(/\b([01]?\d|2[0-3]):([0-5]\d)\b/) ||
+    m.match(/(?:at|every)\s+(\d{1,2})\s*(am|pm)?\b/i);
+
+  let newSchedule = target.schedule;
+  let nextRun = target.nextRun;
+  let enabled = target.enabled ?? true;
+
+  if (/turn\s+off|disable|deactivate|pause|opt\s*out/i.test(m)) {
+    enabled = false;
+  } else if (/turn\s+on|enable|activate|resume|opt\s*in/i.test(m)) {
+    enabled = true;
+  }
+
+  if (timeMatch) {
+    let hour = parseInt(timeMatch[1], 10);
+    const minute = timeMatch[2] ? parseInt(timeMatch[2], 10) : 0;
+    const meridiem = (timeMatch[3] || "").toLowerCase();
+
+    if (meridiem === "pm" && hour < 12) hour += 12;
+    if (meridiem === "am" && hour === 12) hour = 0;
+
+    const timeStr = `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+
+    // Determine cadence
+    let cadence = "Daily";
+    if (/sunday/i.test(m) || /sunday/i.test(target.schedule || "")) cadence = "Sundays";
+    else if (/monday/i.test(m) || /monday/i.test(target.schedule || "")) cadence = "Mondays";
+    else if (/tuesday/i.test(m)) cadence = "Tuesdays";
+    else if (/wednesday/i.test(m)) cadence = "Wednesdays";
+    else if (/thursday/i.test(m)) cadence = "Thursdays";
+    else if (/friday/i.test(m)) cadence = "Fridays";
+    else if (/saturday/i.test(m)) cadence = "Saturdays";
+    else if (/weekday/i.test(m)) cadence = "Weekdays";
+    else if (/hourly/i.test(m)) cadence = "Hourly";
+
+    newSchedule = cadence === "Hourly" ? "Hourly" : `${cadence} · ${timeStr}`;
+
+    // Calculate next run timestamp
+    const nr = new Date();
+    nr.setHours(hour, minute, 0, 0);
+    if (nr.getTime() <= Date.now()) {
+      nr.setDate(nr.getDate() + 1);
+    }
+    nextRun = nr;
+    enabled = true; // Opt in automatically when user explicitly schedules
+  }
+
+  const oldSchedule = target.schedule || "None";
+
+  // Update in Supabase
+  await db
+    .update(automations)
+    .set({
+      schedule: newSchedule,
+      nextRun,
+      enabled,
+    })
+    .where(eq(automations.id, target.id));
+
+  await logAudit({
+    action: `automation.updated — ${target.name}`,
+    runId,
+    authorization: "allowed",
+    resultSummary: `Schedule: "${oldSchedule}" → "${newSchedule}". Status: ${enabled ? "Opted In" : "Disabled"}.`,
+  });
+
+  const nextRunStr = nextRun
+    ? nextRun.toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" }) +
+      " (" +
+      nextRun.toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short" }) +
+      ")"
+    : "—";
+
+  return {
+    text: `Done! I've updated the **${target.name}** automation settings.\n\nSchedule changed from **${oldSchedule}** to **${newSchedule}** (${enabled ? "Opted in / Active" : "Paused"}). The next scheduled execution is set for **${nextRunStr}**.`,
+    blocks: [
+      {
+        type: "result",
+        title: `⚙️ Automation Updated: ${target.name}`,
+        lines: [
+          `Automation: ${target.name}`,
+          `Previous Schedule: ${oldSchedule}`,
+          `New Schedule: ${newSchedule}`,
+          `Status: ${enabled ? "Active (Opted In)" : "Paused"}`,
+          `Next Run: ${nextRunStr}`,
+          `Tools: ${(target.tools ?? []).join(", ")}`,
+        ],
+      },
+      {
+        type: "chips",
+        chips: [
+          { label: "View all automations", send: "Show my automations" },
+          { label: "Evening calendar check at 7pm", send: "Change evening calendar check automation to 7pm" },
+        ],
+      },
+    ],
+  };
+}
+
 async function hEmailTriage(_m: string, { runId }: Ctx): Promise<ChatContent> {
   const res = await execTool("gmail.classify", {}, { runId, reason: "You asked for an email triage" });
   const rows = (res.data as (typeof emailItems.$inferSelect)[]) ?? [];
@@ -744,6 +885,7 @@ async function hFallback(m: string, _ctx: Ctx): Promise<ChatContent> {
 /* ────────────────────────── router ────────────────────────── */
 
 const ROUTES: { re: RegExp; run: (m: string, ctx: Ctx) => Promise<ChatContent> }[] = [
+  { re: /(?:automation|automations)\b|(?:change|update|set|switch|reschedule|adjust)\s+.{0,40}(?:timing|schedule|time|cadence)\b|(?:turn\s+(?:on|off)|enable|disable|activate|pause)\s+.{0,40}automation\b/i, run: hAutomationManage },
   { re: /stride/i, run: hStride },
   { re: /register(ation)?|codespark/i, run: hRegister },
   { re: /(search|find|look).{0,35}(opportunit|hackathon|workshop|event for)|opportunities?( for| that)?/i, run: hOppsSearch },
