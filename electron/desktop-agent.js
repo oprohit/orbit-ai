@@ -122,6 +122,74 @@ function startDesktopAgent() {
       return;
     }
 
+    if (url.pathname === "/mkdir" && req.method === "POST") {
+      let body = "";
+      req.on("data", (chunk) => (body += chunk));
+      req.on("end", async () => {
+        try {
+          const parsed = body ? JSON.parse(body) : {};
+          const folderName = (parsed.folderName || "NewFolder").replace(/[<>:"/\\|?*]/g, "_");
+          const location = (parsed.location || "desktop").toLowerCase();
+          const home = os.homedir();
+
+          let targetDir = path.join(home, "Desktop");
+          if (location === "documents") targetDir = path.join(home, "Documents");
+          if (location === "downloads") targetDir = path.join(home, "Downloads");
+          if (parsed.customPath) targetDir = parsed.customPath;
+
+          const finalPath = path.join(targetDir, folderName);
+          await fs.promises.mkdir(finalPath, { recursive: true });
+
+          if (parsed.openInExplorer) {
+            exec(`explorer "${finalPath}"`);
+          }
+
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(
+            JSON.stringify({
+              ok: true,
+              folderName,
+              path: finalPath,
+              summary: `Created folder "${folderName}" at ${finalPath}`,
+            })
+          );
+        } catch (e) {
+          res.writeHead(500, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: e.message }));
+        }
+      });
+      return;
+    }
+
+    if (url.pathname === "/mail" && req.method === "POST") {
+      let body = "";
+      req.on("data", (chunk) => (body += chunk));
+      req.on("end", () => {
+        try {
+          const parsed = body ? JSON.parse(body) : {};
+          const to = encodeURIComponent(parsed.to || "");
+          const subject = encodeURIComponent(parsed.subject || "");
+          const mailBody = encodeURIComponent(parsed.body || "");
+
+          const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${to}&su=${subject}&body=${mailBody}`;
+          exec(`start "" "${gmailUrl}"`);
+
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(
+            JSON.stringify({
+              ok: true,
+              gmailUrl,
+              summary: `Opened compose draft to ${parsed.to || "recipient"}`,
+            })
+          );
+        } catch (e) {
+          res.writeHead(500, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: e.message }));
+        }
+      });
+      return;
+    }
+
     if (url.pathname === "/open" && req.method === "POST") {
       let body = "";
       req.on("data", (chunk) => (body += chunk));

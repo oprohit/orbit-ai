@@ -13,7 +13,7 @@ export type Block =
   | { type: "scan"; total: string; items: { label: string; size: string }[] }
   | { type: "files"; items: { name: string; folder: string; modified: string; score: string }[] }
   | { type: "expense"; month: string; total: number; byCategory: { cat: string; amount: number }[]; insights: string[] }
-  | { type: "result"; title: string; lines: string[] };
+  | { type: "result"; title: string; lines: string[]; action?: { type: string; payload: any } };
 
 export type ChatContent = { text: string; blocks?: Block[] };
 

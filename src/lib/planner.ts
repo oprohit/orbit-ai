@@ -453,20 +453,120 @@ async function hRemind(m: string, { runId }: Ctx): Promise<ChatContent> {
   };
 }
 
+async function hCreateFolder(m: string, { runId }: Ctx): Promise<ChatContent> {
+  let folderName = "NewFolder";
+  let location = "desktop";
+
+  if (/documents?/i.test(m)) location = "documents";
+  if (/downloads?/i.test(m)) location = "downloads";
+  if (/desktop/i.test(m)) location = "desktop";
+
+  const matchQuotes = m.match(/(?:named|called)\s+["']([^"']+)["']/i);
+  const matchWord = m.match(/(?:named|called)\s+([a-zA-Z0-9_\-\.]+)/i);
+  const matchSimple = m.match(/folder\s+([a-zA-Z0-9_\-\.]+)/i);
+
+  if (matchQuotes?.[1]) {
+    folderName = matchQuotes[1].trim();
+  } else if (matchWord?.[1]) {
+    folderName = matchWord[1].trim();
+  } else if (matchSimple?.[1] && !["on", "in", "to", "named", "called", "the"].includes(matchSimple[1].toLowerCase())) {
+    folderName = matchSimple[1].trim();
+  }
+
+  const res = await execTool(
+    "filesystem.create_folder",
+    { folderName, location },
+    { runId, reason: `Create folder "${folderName}" on ${location}` }
+  );
+
+  const data = res.data as any;
+  const pathMsg = data?.path ? ` at \`${data.path}\`` : "";
+  const isLive = data?.live;
+
+  return {
+    text: isLive
+      ? `Done! I created the folder **"${folderName}"** on your Windows ${location}${pathMsg}. It has been opened for you in Windows Explorer.`
+      : `Done! Created folder **"${folderName}"** on your ${location}${pathMsg}.`,
+    blocks: [
+      {
+        type: "result",
+        title: "📁 Windows Folder Created",
+        lines: [
+          `Folder: ${folderName}`,
+          `Location: ${location}`,
+          `Status: Created successfully on your PC`,
+          ...(data?.path ? [`Path: ${data.path}`] : []),
+        ],
+        action: {
+          type: "mkdir",
+          payload: { folderName, location, path: data?.path },
+        },
+      },
+    ],
+  };
+}
+
+async function hWriteEmail(m: string, { runId }: Ctx): Promise<ChatContent> {
+  const emailMatch = m.match(/[\w.-]+@[\w.-]+\.\w+/);
+  const to = emailMatch ? emailMatch[0] : "professor@example.edu";
+
+  const subMatch = m.match(/(?:about|with subject|subject:)\s+["']?([^"'\n]+?)["']?(?:\s+(?:saying|body:|message:|$))/i);
+  const subject = subMatch ? subMatch[1].trim() : "Follow-up from Aarav";
+
+  let body = `Hi,\n\nI am writing to follow up regarding our discussion. Please let me know if any further details are required.\n\nBest regards,\nAarav`;
+  if (/leave|sick|absence/i.test(m)) {
+    body = `Dear Professor,\n\nI am writing to inform you that I will be unable to attend class due to illness. I will ensure all coursework and assignments are reviewed promptly.\n\nThank you for your understanding.\n\nSincerely,\nAarav (COET Coimbatore)`;
+  } else if (/assignment|project|deadline/i.test(m)) {
+    body = `Dear Professor,\n\nI have completed the assignment and attached the project details for your review. Please let me know if any revisions are needed.\n\nRegards,\nAarav`;
+  }
+
+  await execTool(
+    "gmail.draft",
+    { to, subject, body },
+    { runId, reason: `Prepare email draft to ${to}` }
+  );
+
+  const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(to)}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+
+  return {
+    text: `I've prepared your email draft to **${to}** with subject **"${subject}"**. Click below to review and send in Gmail:`,
+    blocks: [
+      {
+        type: "result",
+        title: `✉️ Gmail Draft: ${subject}`,
+        lines: [
+          `To: ${to}`,
+          `Subject: ${subject}`,
+          `Preview:\n${body.slice(0, 160)}...`,
+        ],
+        action: {
+          type: "mail",
+          payload: { to, subject, body, gmailUrl },
+        },
+      },
+    ],
+  };
+}
+
 async function hCleanup(_m: string, { runId }: Ctx): Promise<ChatContent> {
-  const scan = await execTool("filesystem.scan", {}, { runId, reason: "You asked to clear junk from the PC (via the sandboxed Desktop Agent)" });
+  const scan = await execTool("filesystem.scan", {}, { runId, reason: "You asked to clear junk from the PC (via the Desktop Agent)" });
   const data = scan.data as any;
+  const total = data?.total ?? "4.3 GB";
+  const isLive = data?.live;
   const approval = await createApproval({
     toolId: "filesystem.delete",
-    params: { total: data?.total ?? "4.3 GB", categories: (data?.items ?? []).map((i: any) => i.label) },
-    reason: "You asked to free disk space. Scan identified 4.3 GB of temp/cache files. Deletion is destructive, so it requires approval.",
+    params: { total, categories: (data?.items ?? []).map((i: any) => i.label || i.name) },
+    reason: `Scan identified ${total} of temp/cache files. Deletion is destructive, so it requires approval.`,
     riskLevel: "critical",
     runId,
   });
+  const textMsg = isLive
+    ? `I scanned your PC via the live Orbit Desktop Agent. Found ${data.fileCount} files (${total}) in ${data.scannedPath}. Nothing is deleted until you approve:`
+    : `I scanned via the Orbit Desktop Agent. Found ${total} of potential cleanup, listed below. Nothing is deleted until you approve — file deletion is a CRITICAL action with a second confirmation.`;
   return {
-    text: "I scanned via the Orbit Desktop Agent (sandboxed, path-restricted — no shell access). Found 4.3 GB of potential cleanup, listed below. Nothing is deleted until you approve — file deletion is a CRITICAL action with a second confirmation.",
+    text: textMsg,
     blocks: [
-      { type: "scan", total: data?.total ?? "4.3 GB", items: data?.items ?? [] },
+      { type: "scan", total, items: data?.items ?? [] },
       { type: "approval", approvalId: approval.id },
     ],
   };
@@ -656,6 +756,8 @@ const ROUTES: { re: RegExp; run: (m: string, ctx: Ctx) => Promise<ChatContent> }
   { re: /remind/i, run: hRemind },
   { re: /(junk|free up|clean( up)?|storage|disk space)/i, run: hCleanup },
   { re: /₹|payment|transfer|send .*rs\b|\bupi\b/i, run: hPayment },
+  { re: /(?:create|make|new|add)\s+(?:a\s+)?folder\b|mkdir\b/i, run: hCreateFolder },
+  { re: /(?:write|send|draft|compose)\s+(?:an?\s+)?(?:email|mail|message)\b/i, run: hWriteEmail },
   { re: /(important|unread).{0,22}emails?|check (my )?(inbox|email|mails)|triage|email (summary|brief)|college (emails?|mails?)/i, run: hEmailTriage },
   { re: /summarize|summarise/i, run: hSummarize },
   { re: /(project report|find (my )?(files?|documents?))|\bdrive\b/i, run: hDrive },

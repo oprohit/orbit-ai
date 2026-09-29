@@ -290,6 +290,39 @@ function BlockView({ b, approvals, onDecide, busy, onSend }: { b: Block; approva
         <div className="fade-up rounded-xl border border-line bg-surface p-3.5">
           <div className="mb-1.5 text-[12px] font-semibold text-ink">{b.title}</div>
           <div className="space-y-1">{b.lines.map((l, i) => <div key={i} className="text-[12px] text-muted">{l}</div>)}</div>
+          {b.action?.type === "mkdir" && (
+            <div className="mt-3 flex items-center gap-2 border-t border-line/60 pt-2.5">
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    await fetch("http://127.0.0.1:38291/open", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ path: b.action?.payload?.path }),
+                    });
+                  } catch {
+                    alert("Desktop Agent not reachable at 127.0.0.1:38291. Make sure Orbit AI Launcher or desktop-agent.js is running.");
+                  }
+                }}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-accent/40 bg-accent-soft px-3 py-1.5 text-[11.5px] font-medium text-accent transition hover:brightness-110"
+              >
+                <Icon name="external" size={12} /> Open in Windows Explorer
+              </button>
+            </div>
+          )}
+          {b.action?.type === "mail" && (
+            <div className="mt-3 flex items-center gap-2 border-t border-line/60 pt-2.5">
+              <a
+                href={b.action?.payload?.gmailUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-accent/40 bg-accent px-3 py-1.5 text-[11.5px] font-medium text-white shadow-sm transition hover:brightness-110 glow-accent"
+              >
+                <Icon name="mail" size={13} /> Open Compose in Gmail ↗
+              </a>
+            </div>
+          )}
         </div>
       );
     case "events":
@@ -314,6 +347,10 @@ export default function Chat({ initialMessages }: { initialMessages: Msg[] }) {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [approvals, setApprovals] = useState<Record<string, ApprovalRow>>({});
+  const [listening, setListening] = useState(false);
+  const [speechSupported, setSpeechSupported] = useState(false);
+  const [ttsEnabled, setTtsEnabled] = useState(false);
+  const recognitionRef = useRef<any>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
 
@@ -331,6 +368,71 @@ export default function Chat({ initialMessages }: { initialMessages: Msg[] }) {
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [messages, busy]);
+
+  // Setup Web Speech Recognition
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const SpeechRec = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      if (SpeechRec) {
+        setSpeechSupported(true);
+        const rec = new SpeechRec();
+        rec.continuous = false;
+        rec.interimResults = true;
+        rec.lang = "en-US";
+
+        rec.onresult = (event: any) => {
+          let transcript = "";
+          for (let i = event.resultIndex; i < event.results.length; i++) {
+            transcript += event.results[i][0].transcript;
+          }
+          setInput(transcript);
+        };
+
+        rec.onerror = (e: any) => {
+          console.warn("Speech recognition error:", e);
+          setListening(false);
+        };
+
+        rec.onend = () => {
+          setListening(false);
+        };
+
+        recognitionRef.current = rec;
+      }
+    }
+  }, []);
+
+  const toggleListening = () => {
+    if (!speechSupported || !recognitionRef.current) {
+      alert("Speech recognition is not supported in this browser. Please use Google Chrome or Microsoft Edge.");
+      return;
+    }
+    if (listening) {
+      try { recognitionRef.current.stop(); } catch {}
+      setListening(false);
+    } else {
+      try {
+        recognitionRef.current.start();
+        setListening(true);
+      } catch (err) {
+        console.error("Failed to start speech recognition:", err);
+      }
+    }
+  };
+
+  const speakText = (txt: string) => {
+    if (typeof window !== "undefined" && "speechSynthesis" in window) {
+      window.speechSynthesis.cancel();
+      const clean = txt
+        .replace(/[*_#`~]/g, "")
+        .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+        .slice(0, 320);
+      const utterance = new SpeechSynthesisUtterance(clean);
+      utterance.rate = 1.05;
+      utterance.pitch = 1.0;
+      window.speechSynthesis.speak(utterance);
+    }
+  };
 
   const decide = useCallback(async (id: string, decision: "approved" | "denied", params?: Record<string, any>) => {
     setBusy(true);
@@ -350,6 +452,10 @@ export default function Chat({ initialMessages }: { initialMessages: Msg[] }) {
   const send = useCallback(async (raw: string) => {
     const text = raw.trim();
     if (!text || busy) return;
+    if (listening && recognitionRef.current) {
+      try { recognitionRef.current.stop(); } catch {}
+      setListening(false);
+    }
     const userMsg: Msg = { id: `u-${Date.now()}`, role: "user", content: { text }, createdAt: new Date().toISOString() };
     setMessages((ms) => [...ms, userMsg]);
     setInput("");
@@ -357,7 +463,42 @@ export default function Chat({ initialMessages }: { initialMessages: Msg[] }) {
     try {
       const res = await fetch("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: text }) });
       const data = await res.json();
-      if (data.assistant) setMessages((ms) => [...ms, data.assistant]);
+      if (data.assistant) {
+        setMessages((ms) => [...ms, data.assistant]);
+
+        // Client-side Desktop Agent Bridge execution
+        const blocks = data.assistant.content?.blocks || [];
+        for (const blk of blocks) {
+          if (blk.type === "result" && blk.action) {
+            if (blk.action.type === "mkdir") {
+              fetch("http://127.0.0.1:38291/mkdir", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  folderName: blk.action.payload.folderName,
+                  location: blk.action.payload.location,
+                  openInExplorer: true,
+                }),
+              }).catch(() => {});
+            } else if (blk.action.type === "mail") {
+              fetch("http://127.0.0.1:38291/mail", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  to: blk.action.payload.to,
+                  subject: blk.action.payload.subject,
+                  body: blk.action.payload.body,
+                }),
+              }).catch(() => {});
+            }
+          }
+        }
+
+        // Voice output (TTS) if enabled
+        if (ttsEnabled && data.assistant.content?.text) {
+          speakText(data.assistant.content.text);
+        }
+      }
       await loadApprovals();
       router.refresh();
     } catch {
@@ -365,7 +506,7 @@ export default function Chat({ initialMessages }: { initialMessages: Msg[] }) {
     } finally {
       setBusy(false);
     }
-  }, [busy, loadApprovals, router]);
+  }, [busy, listening, ttsEnabled, loadApprovals, router]);
 
   return (
     <div className="flex h-[calc(100vh-190px)] min-h-[480px] flex-col md:h-[calc(100vh-150px)]">
@@ -403,8 +544,28 @@ export default function Chat({ initialMessages }: { initialMessages: Msg[] }) {
         )}
       </div>
 
+      {/* Voice Listening Banner */}
+      {listening && (
+        <div className="fade-up mb-2 flex items-center justify-between rounded-lg border border-accent/40 bg-accent/10 px-3 py-1.5 text-[11.5px] text-accent">
+          <div className="flex items-center gap-2.5">
+            <span className="relative flex h-2.5 w-2.5">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent opacity-75" />
+              <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-accent" />
+            </span>
+            <span className="font-medium">Listening to speech… speak your goal or command now</span>
+          </div>
+          <button
+            type="button"
+            onClick={toggleListening}
+            className="rounded px-2 py-0.5 text-[10.5px] font-semibold uppercase tracking-wider text-muted transition hover:bg-white/10 hover:text-ink"
+          >
+            Cancel
+          </button>
+        </div>
+      )}
+
       <form
-        className="mt-3 flex items-end gap-2 rounded-xl border border-line bg-surface p-2 focus-within:border-accent/40"
+        className="mt-2 flex items-end gap-2 rounded-xl border border-line bg-surface p-2 focus-within:border-accent/40"
         onSubmit={(e) => { e.preventDefault(); void send(input); }}
       >
         <textarea
@@ -412,15 +573,45 @@ export default function Chat({ initialMessages }: { initialMessages: Msg[] }) {
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void send(input); } }}
           rows={1}
-          placeholder={'Give it a goal — "What\'s important today?" · "Finish my Stride points"'}
+          placeholder={listening ? "Listening... speak now" : 'Give it a goal — "What\'s important today?" · "Create a folder named Projects on desktop"'}
           className="max-h-28 min-h-[38px] flex-1 resize-none bg-transparent px-2 py-1.5 text-[13.5px] text-ink placeholder:text-faint"
         />
+
+        {/* Voice Command Dictation Button */}
+        <button
+          type="button"
+          onClick={toggleListening}
+          title={listening ? "Stop listening" : "Speak voice command (Click to speak)"}
+          className={`grid h-9 w-9 shrink-0 place-items-center rounded-lg border transition ${
+            listening
+              ? "border-danger bg-danger text-white animate-pulse shadow-md"
+              : "border-line bg-white/[0.04] text-muted hover:border-accent/40 hover:text-accent hover:bg-accent/10"
+          }`}
+        >
+          <Icon name="mic" size={16} />
+        </button>
+
+        {/* Send Button */}
         <button type="submit" disabled={busy || !input.trim()} className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-accent text-white transition hover:brightness-110 disabled:opacity-30 glow-accent">
           <Icon name="send" size={15} />
         </button>
       </form>
       <div className="mt-1.5 flex items-center justify-between px-1 text-[10.5px] text-faint">
-        <span>Orbit plans · the policy engine decides · every action is audited</span>
+        <div className="flex items-center gap-3">
+          <span>Orbit plans · the policy engine decides · every action is audited</span>
+          {/* TTS Read-out Toggle */}
+          <button
+            type="button"
+            onClick={() => setTtsEnabled((v) => !v)}
+            className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 transition ${
+              ttsEnabled ? "bg-accent/15 text-accent font-medium" : "text-faint hover:text-muted"
+            }`}
+            title="Toggle AI voice reading responses aloud"
+          >
+            <Icon name={ttsEnabled ? "volume" : "volumeMute"} size={11} />
+            <span>Voice read-out: {ttsEnabled ? "ON" : "OFF"}</span>
+          </button>
+        </div>
         <span className="hidden items-center gap-1.5 sm:flex"><StatusDot tone="warn" pulse /> demo mode — simulated connectors</span>
       </div>
     </div>

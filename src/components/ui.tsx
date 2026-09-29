@@ -29,6 +29,9 @@ const PATHS: Record<string, React.ReactNode> = {
   mail: (<><rect x="3" y="5" width="18" height="14" rx="2.5" /><path d="m3 8 9 6 9-6" /></>),
   external: (<><path d="M14 4h6v6" /><path d="M20 4 10.5 13.5" /><path d="M18 13.5V20H4V6h6.5" /></>),
   orbit: (<><circle cx="12" cy="12" r="3.2" /><ellipse cx="12" cy="12" rx="10" ry="4.2" transform="rotate(-22 12 12)" /><circle cx="20.4" cy="7.6" r="1.1" fill="currentColor" /></>),
+  mic: (<><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" /><path d="M19 10v2a7 7 0 0 1-14 0v-2" /><line x1="12" x2="12" y1="19" y2="22" /></>),
+  volume: (<><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" /><path d="M15.54 8.46a5 5 0 0 1 0 7.07" /></>),
+  volumeMute: (<><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" /><line x1="22" x2="16" y1="9" y2="15" /><line x1="16" x2="22" y1="9" y2="15" /></>),
 };
 
 export function Icon({ name, size = 16, className = "" }: { name: string; size?: number; className?: string }) {
