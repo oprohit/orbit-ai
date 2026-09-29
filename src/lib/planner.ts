@@ -1435,7 +1435,7 @@ function parseMusicQuery(raw: string) {
 async function hPlayMusic(m: string, { runId }: Ctx): Promise<ChatContent> {
   const { song, prefersYtMusic, prefersSpotify } = parseMusicQuery(m);
   
-  const execResult = await execTool("media.play", { song, prefersYtMusic }, { runId, reason: `Play music "${song}"` });
+  const execResult = await runTool("media.play", { song, prefersYtMusic }, { runId });
   const playData = (execResult.data as any) || {};
 
   const resolvedVideoId: string | null = playData.videoId || null;

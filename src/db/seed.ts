@@ -107,6 +107,7 @@ export async function seedDemo() {
     ["skill.toggle", "Skills · Toggle", null, "Enable or disable an agent skill", "medium", true],
     ["automation.toggle", "Automations · Toggle", null, "Enable or disable a scheduled automation", "medium", true],
     ["job.apply", "Jobs · Apply", "jobs", "Submit application via Orbit in background", "low", false],
+    ["media.play", "Media · Play", "youtube", "Play music automatically in browser or YouTube Music", "low", false],
   ];
   await db.insert(s.tools).values(tools.map(([id, name, connectorId, description, riskLevel, requiresApproval]) => ({
     id, name, connectorId, description, riskLevel, requiresApproval, enabled: true,
