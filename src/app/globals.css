@@ -1,0 +1,140 @@
+@import "tailwindcss";
+
+@theme {
+  --color-bg: #0b0b1e;
+  --color-surface: #12122b;
+  --color-surface2: #181838;
+  --color-line: rgba(160, 160, 220, 0.14);
+  --color-ink: #ecebfa;
+  --color-muted: #8f8fb4;
+  --color-faint: #5d5d85;
+  --color-accent: #7c6cff;
+  --color-accent-soft: rgba(124, 108, 255, 0.14);
+  --color-ok: #3ddc97;
+  --color-warn: #ffb84d;
+  --color-danger: #ff5c7a;
+  --color-info: #4dc4ff;
+
+  --font-display: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+  --font-body: "Instrument Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+
+  --radius-card: 12px;
+}
+
+html {
+  color-scheme: dark;
+  scroll-behavior: smooth;
+}
+
+body {
+  background:
+    radial-gradient(1200px 600px at 85% -10%, rgba(124, 108, 255, 0.09), transparent 60%),
+    radial-gradient(900px 500px at -10% 110%, rgba(77, 196, 255, 0.05), transparent 60%),
+    var(--color-bg);
+  color: var(--color-ink);
+  font-feature-settings: "cv02", "cv03";
+}
+
+::selection {
+  background: rgba(124, 108, 255, 0.35);
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(160, 160, 220, 0.22) transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: rgba(160, 160, 220, 0.2);
+  border-radius: 8px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.glow-accent {
+  box-shadow: 0 0 24px rgba(124, 108, 255, 0.25);
+}
+.glow-soft {
+  box-shadow: 0 0 40px rgba(124, 108, 255, 0.08);
+}
+
+@keyframes fadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.fade-up {
+  animation: fadeUp 0.22s ease-out both;
+}
+
+@keyframes pulseDot {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(255, 184, 77, 0.45);
+  }
+  55% {
+    box-shadow: 0 0 0 5px rgba(255, 184, 77, 0);
+  }
+}
+.pulse-warn {
+  animation: pulseDot 2.4s ease-out infinite;
+}
+@keyframes pulseDotOk {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(61, 220, 151, 0.4);
+  }
+  55% {
+    box-shadow: 0 0 0 5px rgba(61, 220, 151, 0);
+  }
+}
+.pulse-ok {
+  animation: pulseDotOk 2.4s ease-out infinite;
+}
+
+@keyframes typing {
+  0%,
+  60%,
+  100% {
+    opacity: 0.25;
+    transform: translateY(0);
+  }
+  30% {
+    opacity: 1;
+    transform: translateY(-2px);
+  }
+}
+.typing-dot {
+  animation: typing 1.1s ease-in-out infinite;
+}
+
+input,
+textarea,
+select {
+  outline: none;
+}
+input:focus,
+textarea:focus,
+select:focus {
+  border-color: rgba(124, 108, 255, 0.5) !important;
+  box-shadow: 0 0 0 3px rgba(124, 108, 255, 0.12);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fade-up,
+  .pulse-warn,
+  .pulse-ok,
+  .typing-dot {
+    animation: none;
+  }
+}

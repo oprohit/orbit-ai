@@ -1,0 +1,121 @@
+import { NextRequest, NextResponse } from "next/server";
+import { eq } from "drizzle-orm";
+import { randomUUID } from "crypto";
+import { db } from "@/db";
+import {
+  automations, connectors, expenseTransactions, goals, goalMilestones, memoryEntries,
+  notifications, profiles, skills, tasks,
+} from "@/db/schema";
+import { execTool } from "@/lib/executor";
+import { resetPolicies, setPolicy } from "@/lib/policy";
+import { logAudit } from "@/lib/audit";
+
+export const dynamic = "force-dynamic";
+
+export async function POST(req: NextRequest) {
+  try {
+    const b = await req.json();
+    const a = b?.action;
+    const id = typeof b?.id === "string" ? b.id : "";
+
+    switch (a) {
+      case "task.status": {
+        const [t] = await db.select().from(tasks).where(eq(tasks.id, id));
+        if (!t) return NextResponse.json({ error: "task not found" }, { status: 404 });
+        const done = b.status === "completed";
+        await db.update(tasks).set({
+          status: b.status,
+          completedAt: done ? new Date() : null,
+        }).where(eq(tasks.id, id));
+        // Stride points: completing a points task advances its goal
+        if (done && t.points && t.goalId) {
+          const [g] = await db.select().from(goals).where(eq(goals.id, t.goalId));
+          if (g) {
+            const nv = (g.currentValue ?? 0) + t.points;
+            await db.update(goals).set({ currentValue: nv, updatedAt: new Date() }).where(eq(goals.id, g.id));
+            await db.insert(notifications).values({ id: randomUUID(), kind: "goal_milestone", title: `Stride progress: +${t.points} pts`, body: `Completed “${t.title}” — goal now at ${nv} points.`, read: false, link: "/goals" });
+          }
+        }
+        await logAudit({ action: `task.status — ${t.title} → ${b.status}`, taskId: id, authorization: "allowed" });
+        return NextResponse.json({ ok: true });
+      }
+
+      case "task.create": {
+        if (!b.title) return NextResponse.json({ error: "title required" }, { status: 400 });
+        const res = await execTool("task.create", { title: b.title, description: b.description ?? null, priority: b.priority ?? "medium", deadline: b.deadline ?? null, status: "inbox", source: "User" }, { reason: "Manual task from UI" });
+        return NextResponse.json(res);
+      }
+
+      case "milestone": {
+        await db.update(goalMilestones).set({ status: b.status }).where(eq(goalMilestones.id, id));
+        return NextResponse.json({ ok: true });
+      }
+
+      case "skill": {
+        await db.update(skills).set({ status: b.status }).where(eq(skills.id, id));
+        return NextResponse.json({ ok: true });
+      }
+
+      case "automation": {
+        await db.update(automations).set({ enabled: !!b.enabled }).where(eq(automations.id, id));
+        await logAudit({ action: `automation.${b.enabled ? "enabled" : "disabled"} — ${id}`, authorization: "approved", resultSummary: "Explicit user opt-in recorded" });
+        return NextResponse.json({ ok: true });
+      }
+
+      case "policy": {
+        if (!b.toolId || !["allow", "ask", "block"].includes(b.level)) return NextResponse.json({ error: "toolId and level required" }, { status: 400 });
+        await setPolicy(b.toolId, b.level);
+        return NextResponse.json({ ok: true });
+      }
+
+      case "policy.reset": {
+        await resetPolicies();
+        return NextResponse.json({ ok: true });
+      }
+
+      case "memory": {
+        if (!b.key || !b.value) return NextResponse.json({ error: "key and value required" }, { status: 400 });
+        const existing = await db.select().from(memoryEntries).where(eq(memoryEntries.key, b.key));
+        if (existing.length) await db.update(memoryEntries).set({ value: b.value }).where(eq(memoryEntries.key, b.key));
+        else await db.insert(memoryEntries).values({ id: randomUUID(), key: b.key, value: b.value, kind: b.kind ?? "preference" });
+        return NextResponse.json({ ok: true });
+      }
+
+      case "memory.delete": {
+        await db.delete(memoryEntries).where(eq(memoryEntries.id, id));
+        return NextResponse.json({ ok: true });
+      }
+
+      case "notification.read": {
+        if (id) await db.update(notifications).set({ read: true }).where(eq(notifications.id, id));
+        else await db.update(notifications).set({ read: true });
+        return NextResponse.json({ ok: true });
+      }
+
+      case "expense.add": {
+        if (!b.amount || !b.category) return NextResponse.json({ error: "amount and category required" }, { status: 400 });
+        await db.insert(expenseTransactions).values({ id: randomUUID(), ts: new Date(b.ts ?? Date.now()), amount: Number(b.amount), category: b.category, merchant: b.merchant ?? null, note: b.note ?? null });
+        await logAudit({ action: `expense.add — ₹${b.amount} (${b.category})`, authorization: "allowed" });
+        return NextResponse.json({ ok: true });
+      }
+
+      case "profile.flags": {
+        const [p] = await db.select().from(profiles).where(eq(profiles.id, "u1"));
+        if (p) await db.update(profiles).set({ flags: { ...(p.flags ?? {}), ...(b.flags ?? {}) } }).where(eq(profiles.id, "u1"));
+        await logAudit({ action: "profile.flags.updated", authorization: "approved", inputSummary: b.flags });
+        return NextResponse.json({ ok: true });
+      }
+
+      case "connector.revoke": {
+        await db.update(connectors).set({ status: "available", connectedAt: null, lastSync: null }).where(eq(connectors.id, id));
+        await logAudit({ action: `connector.revoked — ${id}`, connectorId: id, authorization: "approved" });
+        return NextResponse.json({ ok: true });
+      }
+
+      default:
+        return NextResponse.json({ error: `unknown action: ${a}` }, { status: 400 });
+    }
+  } catch (e) {
+    return NextResponse.json({ error: (e as Error).message }, { status: 500 });
+  }
+}
