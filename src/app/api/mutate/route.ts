@@ -95,6 +95,45 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ ok: true });
       }
 
+      case "task.delete": {
+        const [t] = await db.select().from(tasks).where(eq(tasks.id, id));
+        if (!t) return NextResponse.json({ error: "task not found" }, { status: 404 });
+        await db.delete(tasks).where(eq(tasks.id, id));
+        await logAudit({ action: `task.deleted — ${t.title}`, taskId: id, authorization: "allowed" });
+        return NextResponse.json({ ok: true, deleted: true, id });
+      }
+
+      case "goal.subtask": {
+        const goalId = b.goalId || id;
+        const [g] = await db.select().from(goals).where(eq(goals.id, goalId));
+        if (g) {
+          const newCurrent = typeof b.currentValue === "number" ? b.currentValue : (g.currentValue ?? 0) + (b.completed ? 1 : -1);
+          const target = g.targetValue || 110;
+          const capped = Math.max(0, Math.min(target, newCurrent));
+          const isCompleted = capped >= target;
+          await db.update(goals).set({
+            currentValue: capped,
+            status: isCompleted ? "completed" : "active",
+            nextAction: b.nextAction || g.nextAction,
+            updatedAt: new Date(),
+          }).where(eq(goals.id, goalId));
+
+          if (b.subtaskTitle && b.completed) {
+            await db.insert(notifications).values({
+              id: randomUUID(),
+              kind: "goal_milestone",
+              title: `Subtask Done: ${b.subtaskTitle}`,
+              body: `Completed in ${g.title} · ${capped}/${target} subtasks accomplished!`,
+              read: false,
+              link: "/goals",
+            });
+          }
+          await logAudit({ action: `goal.subtask — ${b.subtaskTitle || "topic"} (${capped}/${target})`, goalId, authorization: "allowed" });
+          return NextResponse.json({ ok: true, currentValue: capped });
+        }
+        return NextResponse.json({ error: "goal not found" }, { status: 404 });
+      }
+
       case "task.create": {
         if (!b.title) return NextResponse.json({ error: "title required" }, { status: 400 });
         const res = await execTool("task.create", { title: b.title, description: b.description ?? null, priority: b.priority ?? "medium", deadline: b.deadline ?? null, status: "inbox", source: "User" }, { reason: "Manual task from UI" });

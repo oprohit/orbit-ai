@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Badge, Btn, Card, Icon, PageHead, RiskBadge, StatusDot, riskTone, DemoTag } from "./ui";
+import WhatsAppLinkModal from "./WhatsAppLinkModal";
 
 export type ConnectorView = {
   id: string; name: string; provider: string | null; category: string | null; description: string | null;
@@ -23,6 +24,7 @@ export default function ConnectorsClient({ connectors }: { connectors: Connector
   const [open, setOpen] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [testResults, setTestResults] = useState<Record<string, { healthy: boolean; latencyMs: number }>>({});
+  const [waModalOpen, setWaModalOpen] = useState(false);
   const router = useRouter();
 
   const act = async (id: string, action: "connect" | "disconnect" | "test") => {
@@ -109,7 +111,22 @@ export default function ConnectorsClient({ connectors }: { connectors: Connector
                         )}
                         {c.notes && <div className="rounded-lg border border-line bg-bg px-2.5 py-2 text-[11.5px] text-faint">{c.notes}</div>}
                         <div className="flex flex-wrap items-center gap-2 pt-1">
-                          {c.status === "connected" ? (
+                          {c.id === "whatsapp" ? (
+                            <>
+                              <button
+                                onClick={() => setWaModalOpen(true)}
+                                className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/40 bg-emerald-500/15 px-3 py-1 text-[11.5px] font-medium text-emerald-400 hover:bg-emerald-500/25 transition shadow-xs"
+                              >
+                                <span>💬</span>
+                                <span>{c.status === "connected" ? "Manage WhatsApp Device" : "Link Personal WhatsApp (QR Scan)"}</span>
+                              </button>
+                              {c.status === "connected" && (
+                                <Btn size="sm" variant="danger" disabled={busy === `${c.id}-disconnect`} onClick={() => void act(c.id, "disconnect")}>
+                                  Unlink
+                                </Btn>
+                              )}
+                            </>
+                          ) : c.status === "connected" ? (
                             <Btn size="sm" variant="danger" disabled={busy === `${c.id}-disconnect`} onClick={() => void act(c.id, "disconnect")}>Revoke access</Btn>
                           ) : c.status === "available" ? (
                             <>
@@ -149,8 +166,15 @@ export default function ConnectorsClient({ connectors }: { connectors: Connector
       </div>
       <p className="mt-6 flex items-start gap-2 text-[12px] text-faint">
         <Icon name="security" size={13} className="mt-0.5 shrink-0" />
-        Official OAuth 2.0 with minimum scopes in production. This sandbox runs simulated connectors (clearly badged) — Orbit never fakes a live integration, and unavailable platforms (e.g. consumer WhatsApp) stay visibly unavailable.
+        Official OAuth 2.0 with minimum scopes in production. Personal WhatsApp connects directly via Multi-Device QR scan — Orbit reads incoming messages, filters out non-task banter, and adds actionable tasks to your inbox automatically.
       </p>
+
+      {/* WhatsApp QR Modal */}
+      <WhatsAppLinkModal
+        isOpen={waModalOpen}
+        onClose={() => setWaModalOpen(false)}
+        onStatusChange={() => router.refresh()}
+      />
     </div>
   );
 }

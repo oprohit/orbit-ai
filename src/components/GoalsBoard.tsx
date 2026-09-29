@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Badge, Btn, Card, Icon, PageHead, Progress, StatusDot } from "./ui";
+import { GATE_CATEGORIES, GATE_100_SUBTASKS, CuratedSubtask } from "@/lib/gateCurriculum";
 
 export type GoalView = {
   id: string;
@@ -184,9 +185,22 @@ const MS_NEXT: Record<string, string> = { pending: "in_progress", in_progress: "
 
 export default function GoalsBoard({ goals }: { goals: GoalView[] }) {
   const [open, setOpen] = useState<string | null>(goals[0]?.id ?? null);
-  const [activeTab, setActiveTab] = useState<Record<string, "roadmap" | "tasks" | "resources">>({});
+  const [activeTab, setActiveTab] = useState<Record<string, "roadmap" | "tasks" | "subtasks" | "resources">>({});
+  const [subtaskDone, setSubtaskDone] = useState<Record<string, Record<string, boolean>>>({});
+  const [selectedCategory, setSelectedCategory] = useState<Record<string, string>>({});
+  const [subtaskSearch, setSubtaskSearch] = useState<Record<string, string>>({});
+  const [subtaskFilter, setSubtaskFilter] = useState<Record<string, "all" | "pending" | "completed">>({});
   const router = useRouter();
   const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem("orbit_gate_subtasks_done");
+      if (stored) {
+        setSubtaskDone((prev) => ({ ...prev, "gate-cse-2026": JSON.parse(stored) }));
+      }
+    } catch {}
+  }, []);
 
   const mutate = async (body: Record<string, unknown>) => {
     setBusy(true);
@@ -217,25 +231,69 @@ export default function GoalsBoard({ goals }: { goals: GoalView[] }) {
     <div>
       <PageHead
         title="Goals"
-        sub="Each goal is an interactive milestone roadmap with linked tasks, live progress tracking, and curated study resources."
+        sub="Long-term objectives with interactive roadmap, categorized subtasks (100+ topics), and curated study resources."
       />
       <div className="grid gap-4 lg:grid-cols-2">
         {goals.map((g) => {
+          const isGateGoal = /gate/i.test(g.title) || g.unit === "subtasks";
+          const currentGoalSubtaskDone = subtaskDone[g.id] || {};
+          const completedSubtasksCount = Object.values(currentGoalSubtaskDone).filter(Boolean).length;
+
           // Calculate authoritative progress
           const completedTasksCount = g.tasks.filter((t) => t.status === "completed").length;
           const pointsSum = g.tasks.reduce((sum, t) => sum + (t.status === "completed" ? (t.points ?? 0) : 0), 0);
 
-          const currentValue = g.unit === "points"
-            ? (pointsSum > 0 ? pointsSum : (g.currentValue ?? 0))
-            : (g.tasks.length > 0 ? completedTasksCount : (g.currentValue ?? 0));
+          const currentValue = isGateGoal
+            ? (completedSubtasksCount > 0 ? completedSubtasksCount : (g.currentValue ?? 0))
+            : (g.unit === "points"
+                ? (pointsSum > 0 ? pointsSum : (g.currentValue ?? 0))
+                : (g.tasks.length > 0 ? completedTasksCount : (g.currentValue ?? 0)));
 
-          const targetValue = g.targetValue || (g.tasks.length || 1);
+          const targetValue = isGateGoal ? 110 : (g.targetValue || (g.tasks.length || 1));
           const pct = Math.min(100, Math.round((currentValue / targetValue) * 100));
           const isDone = pct >= 100;
           const days = g.deadline ? Math.max(0, Math.ceil((new Date(g.deadline).getTime() - Date.now()) / 86400000)) : null;
           const isOpen = open === g.id;
-          const currentTab = activeTab[g.id] || "roadmap";
+          const currentTab = activeTab[g.id] || (isGateGoal ? "subtasks" : "roadmap");
           const resources = getGoalResources(g.title, g.description);
+
+          const activeCatId = selectedCategory[g.id] || "all";
+          const activeSearch = (subtaskSearch[g.id] || "").toLowerCase().trim();
+          const activeFilter = subtaskFilter[g.id] || "all";
+
+          const allSubtasksForGoal = isGateGoal ? GATE_100_SUBTASKS : [];
+
+          const filteredSubtasks = allSubtasksForGoal.filter((st) => {
+            if (activeCatId !== "all" && st.categoryId !== activeCatId) return false;
+            if (activeFilter === "completed" && !currentGoalSubtaskDone[st.id]) return false;
+            if (activeFilter === "pending" && currentGoalSubtaskDone[st.id]) return false;
+            if (activeSearch) {
+              const match = st.title.toLowerCase().includes(activeSearch) ||
+                st.categoryName.toLowerCase().includes(activeSearch) ||
+                st.weight.toLowerCase().includes(activeSearch);
+              if (!match) return false;
+            }
+            return true;
+          });
+
+          const toggleSubtask = async (subtaskId: string, title: string) => {
+            const updated = { ...currentGoalSubtaskDone, [subtaskId]: !currentGoalSubtaskDone[subtaskId] };
+            setSubtaskDone((prev) => ({ ...prev, [g.id]: updated }));
+            try {
+              localStorage.setItem(`orbit_${g.id}_subtasks_done`, JSON.stringify(updated));
+              localStorage.setItem("orbit_gate_subtasks_done", JSON.stringify(updated));
+            } catch {}
+
+            const newDoneCount = Object.values(updated).filter(Boolean).length;
+            await mutate({
+              action: "goal.subtask",
+              goalId: g.id,
+              currentValue: newDoneCount,
+              subtaskTitle: title,
+              completed: updated[subtaskId],
+              nextAction: updated[subtaskId] ? `Continue mastering subtasks: ${title}` : g.nextAction,
+            });
+          };
 
           return (
             <Card key={g.id} className={`p-4 transition-all ${isDone ? "border-ok/40 bg-surface/90" : ""}`} glow={isOpen}>
@@ -288,7 +346,20 @@ export default function GoalsBoard({ goals }: { goals: GoalView[] }) {
                       }`}
                     >
                       <Icon name="activity" size={13} className={currentTab === "roadmap" ? "text-accent" : "text-faint"} />
-                      <span>Roadmap Flow</span>
+                      <span className="hidden sm:inline">Roadmap Flow</span>
+                      <span className="sm:hidden">Roadmap</span>
+                    </button>
+                    <button
+                      onClick={() => setActiveTab((prev) => ({ ...prev, [g.id]: "subtasks" }))}
+                      className={`relative flex flex-1 items-center justify-center gap-1.5 rounded-md py-1.5 font-semibold transition ${
+                        currentTab === "subtasks" ? "bg-accent/15 text-accent shadow-sm border border-accent/40" : "text-muted hover:text-ink"
+                      }`}
+                    >
+                      <span className="text-[12px]">📚</span>
+                      <span>Subtasks ({isGateGoal ? `${completedSubtasksCount}/110` : "100+"})</span>
+                      {currentTab !== "subtasks" && (
+                        <span className="inline-flex h-2 w-2 rounded-full bg-accent animate-ping absolute -top-0.5 -right-0.5" />
+                      )}
                     </button>
                     <button
                       onClick={() => setActiveTab((prev) => ({ ...prev, [g.id]: "tasks" }))}
@@ -297,7 +368,8 @@ export default function GoalsBoard({ goals }: { goals: GoalView[] }) {
                       }`}
                     >
                       <Icon name="tasks" size={13} className={currentTab === "tasks" ? "text-accent" : "text-faint"} />
-                      <span>Objectives ({completedTasksCount}/{g.tasks.length || g.milestones.length})</span>
+                      <span className="hidden sm:inline">Objectives ({completedTasksCount}/{g.tasks.length || g.milestones.length})</span>
+                      <span className="sm:hidden">Objectives</span>
                     </button>
                     <button
                       onClick={() => setActiveTab((prev) => ({ ...prev, [g.id]: "resources" }))}
@@ -306,7 +378,8 @@ export default function GoalsBoard({ goals }: { goals: GoalView[] }) {
                       }`}
                     >
                       <span className="text-[12px]">📺</span>
-                      <span>Study & Videos</span>
+                      <span className="hidden sm:inline">Study & Videos</span>
+                      <span className="sm:hidden">Videos</span>
                       <span className="ml-1 rounded-full bg-accent/20 px-1.5 py-0.2 text-[10px] text-accent font-semibold">{resources.length}</span>
                     </button>
                   </div>
@@ -458,6 +531,212 @@ export default function GoalsBoard({ goals }: { goals: GoalView[] }) {
                           ))}
                         </div>
                       </div>
+                    </div>
+                  )}
+
+                  {/* TAB: CATEGORIZED SUBTASKS EXPLORER (100+ TOPICS) */}
+                  {currentTab === "subtasks" && (
+                    <div className="space-y-4">
+                      {/* Subtasks Header & Overall Progress Banner */}
+                      <div className="rounded-xl border border-line/70 bg-surface/70 p-3.5 space-y-2">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="flex items-center gap-2.5">
+                            <span className="grid h-8 w-8 place-items-center rounded-lg bg-accent/20 text-[16px]">🎯</span>
+                            <div>
+                              <div className="text-[13.5px] font-semibold text-ink flex items-center gap-2">
+                                <span>{isGateGoal ? "110 Curated Subtasks across 10 Subject Categories" : "Categorized Goal Subtasks"}</span>
+                                <Badge tone="accent">Comprehensive Syllabus</Badge>
+                              </div>
+                              <div className="text-[11px] text-muted">
+                                Scroll through subject categories below. Every topic provides direct lecture links, weightage, and completion tracking.
+                              </div>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Badge tone={completedSubtasksCount === (isGateGoal ? 110 : 1) ? "ok" : "accent"} className="text-[11px] font-mono">
+                              {completedSubtasksCount} / {isGateGoal ? 110 : (g.tasks.length || 1)} done ({isGateGoal ? Math.round((completedSubtasksCount / 110) * 100) : pct}%)
+                            </Badge>
+                          </div>
+                        </div>
+                        <Progress value={isGateGoal ? Math.round((completedSubtasksCount / 110) * 100) : pct} tone={completedSubtasksCount === 110 ? "ok" : "accent"} />
+                      </div>
+
+                      {/* HORIZONTAL CATEGORY SCROLL BAR (Sticky / Easy Scroll) */}
+                      <div>
+                        <div className="mb-1.5 flex items-center justify-between text-[11px] text-faint">
+                          <span className="font-semibold uppercase tracking-wider">Subject Categories ({GATE_CATEGORIES.length})</span>
+                          <span className="text-[10.5px] text-accent font-medium">← Scroll horizontally to switch subjects →</span>
+                        </div>
+                        <div className="flex items-center gap-2 overflow-x-auto pb-2 pt-0.5 scroll-smooth">
+                          {/* 'All' Category Chip */}
+                          <button
+                            onClick={() => setSelectedCategory((prev) => ({ ...prev, [g.id]: "all" }))}
+                            className={`flex shrink-0 items-center gap-1.5 rounded-xl border px-3 py-1.5 text-[12px] font-medium transition ${
+                              activeCatId === "all"
+                                ? "border-accent bg-accent-soft text-accent shadow-sm ring-1 ring-accent/30"
+                                : "border-line bg-surface text-muted hover:border-line hover:text-ink hover:bg-white/[0.04]"
+                            }`}
+                          >
+                            <span>🔥</span>
+                            <span>All Topics</span>
+                            <span className="rounded-full bg-white/10 px-1.5 py-0.2 text-[10px] font-semibold">
+                              {completedSubtasksCount}/110
+                            </span>
+                          </button>
+
+                          {/* Category Chips */}
+                          {GATE_CATEGORIES.map((cat) => {
+                            const catSubtasks = GATE_100_SUBTASKS.filter((st) => st.categoryId === cat.id);
+                            const catCompletedCount = catSubtasks.filter((st) => currentGoalSubtaskDone[st.id]).length;
+                            const isCatSelected = activeCatId === cat.id;
+
+                            return (
+                              <button
+                                key={cat.id}
+                                onClick={() => setSelectedCategory((prev) => ({ ...prev, [g.id]: cat.id }))}
+                                className={`flex shrink-0 items-center gap-1.5 rounded-xl border px-3 py-1.5 text-[12px] font-medium transition ${
+                                  isCatSelected
+                                    ? "border-accent bg-accent-soft text-accent shadow-sm ring-1 ring-accent/30"
+                                    : "border-line bg-surface text-muted hover:border-line hover:text-ink hover:bg-white/[0.04]"
+                                }`}
+                              >
+                                <span>{cat.icon}</span>
+                                <span>{cat.shortName}</span>
+                                <span className={`rounded-full px-1.5 py-0.2 text-[10px] font-semibold ${catCompletedCount === catSubtasks.length && catSubtasks.length > 0 ? "bg-ok/20 text-ok" : "bg-white/10"}`}>
+                                  {catCompletedCount}/{catSubtasks.length}
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      {/* Search & Status Filter Controls */}
+                      <div className="flex flex-wrap items-center gap-2">
+                        <div className="relative flex-1 min-w-[200px]">
+                          <input
+                            type="text"
+                            value={activeSearch}
+                            onChange={(e) => setSubtaskSearch((prev) => ({ ...prev, [g.id]: e.target.value }))}
+                            placeholder="Search 110 topics (e.g. deadlock, paging, avl, sql, eigenvalues, crc)..."
+                            className="w-full rounded-xl border border-line bg-bg px-3 py-1.5 text-[12px] text-ink placeholder:text-faint focus:border-accent focus:outline-none"
+                          />
+                          {activeSearch && (
+                            <button
+                              onClick={() => setSubtaskSearch((prev) => ({ ...prev, [g.id]: "" }))}
+                              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[11px] text-faint hover:text-ink"
+                            >
+                              ✕
+                            </button>
+                          )}
+                        </div>
+
+                        <div className="flex items-center gap-1 rounded-lg border border-line bg-bg p-0.5 text-[11.5px]">
+                          {(["all", "pending", "completed"] as const).map((filterOpt) => (
+                            <button
+                              key={filterOpt}
+                              onClick={() => setSubtaskFilter((prev) => ({ ...prev, [g.id]: filterOpt }))}
+                              className={`rounded-md px-2 py-1 capitalize transition ${
+                                activeFilter === filterOpt ? "bg-surface text-ink font-semibold shadow-xs" : "text-faint hover:text-muted"
+                              }`}
+                            >
+                              {filterOpt}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Category Details Banner */}
+                      {activeCatId !== "all" && (
+                        <div className="flex items-center justify-between rounded-xl border border-line/60 bg-surface/50 px-3 py-2 text-[12px]">
+                          {(() => {
+                            const currentCategoryObj = GATE_CATEGORIES.find((c) => c.id === activeCatId);
+                            const catSubtasks = GATE_100_SUBTASKS.filter((st) => st.categoryId === activeCatId);
+                            const doneInCat = catSubtasks.filter((st) => currentGoalSubtaskDone[st.id]).length;
+                            return (
+                              <>
+                                <div className="flex items-center gap-2">
+                                  <span>{currentCategoryObj?.icon}</span>
+                                  <span className="font-semibold text-ink">{currentCategoryObj?.name}</span>
+                                  <span className="text-faint">({currentCategoryObj?.description})</span>
+                                </div>
+                                <span className="font-mono text-muted text-[11px]">
+                                  {doneInCat} of {catSubtasks.length} mastered
+                                </span>
+                              </>
+                            );
+                          })()}
+                        </div>
+                      )}
+
+                      {/* Subtask Rows List */}
+                      <div className="space-y-2 max-h-[520px] overflow-y-auto pr-1">
+                        {filteredSubtasks.map((st) => {
+                          const isSubDone = !!currentGoalSubtaskDone[st.id];
+
+                          return (
+                            <div
+                              key={st.id}
+                              className={`group flex items-start gap-3 rounded-xl border p-3 transition-all ${
+                                isSubDone ? "border-ok/30 bg-ok/[0.04]" : "border-line bg-surface hover:border-line hover:bg-white/[0.02]"
+                              }`}
+                            >
+                              {/* Checkbox Toggle Button */}
+                              <button
+                                onClick={() => void toggleSubtask(st.id, st.title)}
+                                className={`mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-md border transition-all ${
+                                  isSubDone ? "border-ok bg-ok text-black shadow-sm" : "border-line text-transparent hover:border-accent"
+                                }`}
+                                title={isSubDone ? "Mark Pending" : "Mark Completed"}
+                              >
+                                <Icon name="check" size={12} />
+                              </button>
+
+                              {/* Subtask Info */}
+                              <div className="min-w-0 flex-1">
+                                <div className="flex flex-wrap items-center gap-1.5">
+                                  <span className={`text-[13px] font-medium leading-snug ${isSubDone ? "text-faint line-through" : "text-ink font-semibold"}`}>
+                                    {st.title}
+                                  </span>
+                                </div>
+                                <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px]">
+                                  <Badge tone="muted" className="text-[10px]">{st.categoryName}</Badge>
+                                  <Badge tone="accent" className="text-[10px]">{st.weight}</Badge>
+                                </div>
+                              </div>
+
+                              {/* Direct Study Resource / Video Button */}
+                              <a
+                                href={st.resource.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="shrink-0 flex items-center gap-1.5 rounded-lg border border-red-500/30 bg-red-500/10 px-2.5 py-1 text-[11px] font-medium text-red-400 hover:bg-red-500/20 hover:text-red-300 transition-colors shadow-xs"
+                                title={`Watch ${st.resource.title} by ${st.resource.creator}`}
+                              >
+                                <span>▶</span>
+                                <span className="hidden sm:inline">{st.resource.creator}</span>
+                                <span className="sm:hidden">Watch</span>
+                                <Icon name="external" size={10} className="text-red-400/80" />
+                              </a>
+                            </div>
+                          );
+                        })}
+
+                        {filteredSubtasks.length === 0 && (
+                          <div className="rounded-xl border border-dashed border-line px-4 py-8 text-center text-[12.5px] text-faint">
+                            No subtasks match your filter or search query. Try clearing the search or switching categories.
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Goal Completion Celebration Banner */}
+                      {completedSubtasksCount === 110 && (
+                        <div className="rounded-xl border border-ok/50 bg-ok/10 p-4 text-center text-ok space-y-1">
+                          <div className="text-[18px]">🏆 💯</div>
+                          <div className="font-semibold text-[14px]">All 110 GATE Topics Completed!</div>
+                          <div className="text-[12px] text-ok/80">Outstanding dedication! You have covered the complete syllabus and are ready to ace the exam.</div>
+                        </div>
+                      )}
                     </div>
                   )}
 

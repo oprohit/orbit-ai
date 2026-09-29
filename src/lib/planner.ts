@@ -2,7 +2,7 @@ import { asc, desc, eq, gte, like } from "drizzle-orm";
 import { randomUUID } from "crypto";
 import { db } from "@/db";
 import {
-  approvals, automations, calendarEvents, emailItems, goalMilestones, goals, profiles, tasks,
+  approvals, automations, calendarEvents, connectors, emailItems, goalMilestones, goals, profiles, tasks,
 } from "@/db/schema";
 import { createApproval, execTool } from "./executor";
 import { generateNaturalEmail, llmReply } from "./ai";
@@ -1496,9 +1496,80 @@ async function hBreakGoal(m: string, { runId }: Ctx): Promise<ChatContent> {
   };
 }
 
+async function hWhatsApp(_m: string, { runId }: Ctx): Promise<ChatContent> {
+  let isConnected = false;
+  let userName = "Personal WhatsApp";
+
+  try {
+    const res = await fetch("http://127.0.0.1:38291/whatsapp/status", { signal: AbortSignal.timeout(1200) });
+    if (res.ok) {
+      const data = await res.json();
+      isConnected = data.connected;
+      if (data.user?.name) userName = data.user.name;
+    }
+  } catch {}
+
+  if (!isConnected) {
+    const [c] = await db.select().from(connectors).where(eq(connectors.id, "whatsapp"));
+    isConnected = c?.status === "connected";
+  }
+
+  const dbTasks = await db
+    .select({ id: tasks.id, title: tasks.title, priority: tasks.priority })
+    .from(tasks)
+    .where(like(tasks.source, "WhatsApp%"))
+    .orderBy(desc(tasks.createdAt))
+    .limit(5);
+
+  await logAudit({
+    action: "whatsapp.status_check",
+    runId,
+    connectorId: "whatsapp",
+    authorization: "allowed",
+  });
+
+  if (isConnected) {
+    return {
+      text: `Your personal WhatsApp is linked and active (${userName}). Orbit continuously scans incoming messages with smart NLP, automatically ignoring casual chit-chat, and adding real tasks directly to your Tasks board.`,
+      blocks: [
+        {
+          type: "tasks",
+          items: dbTasks.map((t) => ({
+            id: t.id,
+            title: t.title,
+            status: "inbox",
+            points: undefined,
+          })),
+        },
+        {
+          type: "chips",
+          chips: [
+            { label: "View all tasks", send: "Show me my tasks" },
+            { label: "What's important today?", send: "What's important today?" },
+          ],
+        },
+      ],
+    };
+  }
+
+  return {
+    text: "I've prepared personal WhatsApp linking via QR Code scan. No WhatsApp Business API or Meta Cloud credentials are required — simply open WhatsApp on your phone, go to Linked Devices (Settings → Linked Devices), and scan the QR code in Connectors to pair.",
+    blocks: [
+      {
+        type: "chips",
+        chips: [
+          { label: "Open Connectors to scan QR", send: "Check connectors" },
+          { label: "What's important today?", send: "What's important today?" },
+        ],
+      },
+    ],
+  };
+}
+
 /* ────────────────────────── router ────────────────────────── */
 
 const ROUTES: { re: RegExp; run: (m: string, ctx: Ctx) => Promise<ChatContent> }[] = [
+  { re: /(?:setup|link|connect|scan|sync|read|qr)\s*(?:my\s*)?whatsapp|whatsapp\b/i, run: hWhatsApp },
   { re: /^(?:please\s+)?(?:play|listen to)\s+(?:music|song|track)?\s*["']?([^"'\n]+?)["']?$/i, run: hPlayMusic },
   { re: /(?:prepare for|i want to prepare|how to (?:prepare|study|learn|master)|roadmap for|break down (?:my )?goal|breakdown|study plan for|syllabus for|strategy for)\s+([a-zA-Z0-9\s-]+)/i, run: hBreakGoal },
   { re: /(?:automation|automations)\b|(?:change|update|set|reschedule|adjust|switch|turn\s+(?:on|off)|enable|disable|pause)\s+.{0,50}(?:email triage|calendar check|expense report|internship search|approval ping|timing|schedule|cadence)\b|(?:email triage|calendar check|expense report|internship search|approval ping)\s*.{0,50}(?:change|update|set|to\s+\d|at\s+\d|every)\b/i, run: hAutomationManage },
