@@ -2,8 +2,8 @@ import { randomUUID } from "crypto";
 import { and, desc, eq, gte, lte, ne } from "drizzle-orm";
 import { db } from "@/db";
 import {
-  calendarEvents, documents, emailItems, expenseTransactions,
-  jobResults, notifications, tasks,
+  automations, calendarEvents, documents, emailItems, expenseTransactions,
+  goals, jobResults, notifications, skills, tasks,
 } from "@/db/schema";
 import type { ToolResult } from "./types";
 
@@ -401,6 +401,54 @@ export async function runTool(toolId: string, params: Record<string, any>, _ctx?
     }
     case "approval.check": {
       return { ok: true, summary: "Checked pending approvals" };
+    }
+    case "skill.toggle": {
+      const id = String(params.id ?? "");
+      const status = params.status === "disabled" ? "disabled" : "enabled";
+      const name = String(params.name ?? id);
+      await db.update(skills).set({ status }).where(eq(skills.id, id));
+      return { ok: true, summary: `Skill "${name}" ${status}`, data: { id, status } };
+    }
+    case "automation.toggle": {
+      const id = String(params.id ?? "");
+      const enabled = !!params.enabled;
+      const name = String(params.name ?? id);
+      await db.update(automations).set({ enabled }).where(eq(automations.id, id));
+      return { ok: true, summary: `Automation "${name}" ${enabled ? "enabled" : "disabled"}`, data: { id, enabled } };
+    }
+    case "job.apply": {
+      const role = String(params.role ?? "Position");
+      const company = String(params.company ?? "Company");
+      const followUp = at(3, 10, 0);
+      await db.insert(tasks).values({
+        id: randomUUID(),
+        title: `Follow up on application: ${role} at ${company}`,
+        description: "Application submitted via Orbit in background. Check portal / email for reply.",
+        priority: "medium",
+        deadline: followUp,
+        status: "waiting",
+        source: "Orbit Application",
+        createdBy: "agent",
+      });
+      const allGoals = await db.select().from(goals);
+      const internGoal = allGoals.find((g) => /react|intern/i.test(g.title));
+      if (internGoal) {
+        const nv = Math.min((internGoal.targetValue || 10), (internGoal.currentValue ?? 0) + 1);
+        await db.update(goals).set({ currentValue: nv, updatedAt: new Date() }).where(eq(goals.id, internGoal.id));
+      }
+      await db.insert(notifications).values({
+        id: randomUUID(),
+        kind: "job",
+        title: `Applied to ${role}`,
+        body: `Orbit submitted your application to ${company} in background. Follow-up task scheduled for ${fmtDay(followUp)}.`,
+        read: false,
+        link: "/tasks",
+      });
+      return {
+        ok: true,
+        summary: `Successfully applied to ${role} at ${company} in background`,
+        data: { role, company, followUp: fmtDay(followUp) },
+      };
     }
     default:
       return { ok: false, summary: `No executor registered for ${toolId}` };

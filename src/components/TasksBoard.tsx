@@ -67,7 +67,18 @@ export default function TasksBoard({ tasks }: { tasks: TaskView[] }) {
               {typeof t.points === "number" && <Badge tone="accent">+{t.points} pts</Badge>}
               {t.goalTitle && <Badge tone="muted" className="hidden md:inline-flex">{t.goalTitle}</Badge>}
               <span className="hidden text-[11px] text-faint sm:block">{t.source}</span>
-              {t.deadline && <span className="hidden shrink-0 font-mono text-[11px] text-muted md:block">{new Date(t.deadline).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}</span>}
+              {t.deadline && (
+                <span className="shrink-0 font-mono text-[11px] text-muted flex items-center gap-1">
+                  <Icon name="calendar" size={10} className="text-faint" />
+                  {(() => {
+                    const d = new Date(t.deadline);
+                    const isToday = d.toDateString() === new Date().toDateString();
+                    const dateStr = isToday ? "Today" : d.toLocaleDateString("en-IN", { day: "numeric", month: "short" });
+                    const timeStr = d.toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" }).replace(" ", "").toLowerCase();
+                    return `${dateStr} · ${timeStr}`;
+                  })()}
+                </span>
+              )}
               <button onClick={() => void act(t.id, NEXT[t.status ?? "inbox"])} disabled={busyId === t.id} className={`shrink-0 rounded-md border px-2 py-0.5 text-[11px] transition hover:brightness-110 ${`border-transparent bg-white/5 text-muted`}`}>
                 <Badge tone={TONE[t.status ?? "inbox"]}>{LABEL[t.status ?? "inbox"]}</Badge>
               </button>

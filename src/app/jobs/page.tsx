@@ -3,6 +3,7 @@ import Link from "next/link";
 import { db } from "@/db";
 import { jobResults } from "@/db/schema";
 import { Badge, Card, Icon, PageHead, DemoTag } from "@/components/ui";
+import ApplyJobButton from "@/components/ApplyJobButton";
 
 export const dynamic = "force-dynamic";
 
@@ -29,9 +30,7 @@ export default async function JobsPage() {
               {j.match && <div className="mt-2 rounded-lg border border-line bg-bg px-2.5 py-1.5 text-[11.5px] text-muted"><span className="text-faint">Why it matches: </span>{j.match.replace(/^\d+% — ?/, "")}</div>}
               <div className="mt-3 flex items-center gap-3">
                 <span className="text-[11px] text-faint">{j.source}</span>
-                <Link href="/" className="ml-auto flex items-center gap-1 text-[12px] text-accent hover:underline">
-                  Apply via Orbit <Icon name="orbit" size={12} />
-                </Link>
+                <ApplyJobButton jobId={j.id} role={j.role ?? "Position"} company={j.company ?? "Company"} />
               </div>
             </Card>
           );

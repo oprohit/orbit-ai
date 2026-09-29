@@ -16,6 +16,9 @@ const HUMAN_ACTION: Record<string, string> = {
   "filesystem.delete": "Delete files (cleanup)",
   "filesystem.archive": "Move files to archive",
   "task.create": "Create task",
+  "skill.toggle": "Toggle skill",
+  "automation.toggle": "Toggle automation",
+  "job.apply": "Apply to job",
 };
 
 function toolEffect(toolId: string, params: Record<string, any>): string {
@@ -30,6 +33,12 @@ function toolEffect(toolId: string, params: Record<string, any>): string {
       return `₹${params.amount} will move from your connected account to ${params.recipient}. Reversible only within the PSP window.`;
     case "filesystem.delete":
       return `~${params.total ?? "several GB"} of files will be removed after archival. This is destructive.`;
+    case "skill.toggle":
+      return `The skill "${params.name || params.id}" will be ${params.status === "disabled" ? "disabled — the agent will no longer automatically trigger this capability" : "enabled and available to the agent"}.`;
+    case "automation.toggle":
+      return `The automation "${params.name || params.id}" will be ${params.enabled ? "enabled and will run according to its schedule" : "paused/disabled — scheduled runs will be skipped"}.`;
+    case "job.apply":
+      return `Orbit will submit your application for ${params.role} at ${params.company} and schedule a follow-up task.`;
     default:
       return "The connected service will be modified as described in the parameters.";
   }
@@ -38,6 +47,7 @@ function toolEffect(toolId: string, params: Record<string, any>): string {
 export async function createApproval(args: {
   toolId: string;
   params: Record<string, any>;
+  action?: string;
   reason?: string;
   runId?: string | null;
   riskLevel?: string;
@@ -45,7 +55,7 @@ export async function createApproval(args: {
   taskId?: string | null;
 }): Promise<{ id: string; action: string; effect: string }> {
   const [tool] = await db.select().from(tools).where(eq(tools.id, args.toolId));
-  const action = HUMAN_ACTION[args.toolId] ?? tool?.name ?? args.toolId;
+  const action = args.action ?? HUMAN_ACTION[args.toolId] ?? tool?.name ?? args.toolId;
   const effect = toolEffect(args.toolId, args.params ?? {});
   const id = randomUUID();
   await db.insert(approvals).values({
@@ -206,6 +216,12 @@ function approvalResultText(toolId: string, data: unknown, params: Record<string
       return `Cleanup complete — freed ${d.freed ?? "4.3 GB"}. Files were archived before deletion (sandbox). Receipt saved to the audit ledger.`;
     case "gmail.send":
       return `Email sent to ${d.to ?? params.to}. It's now in the sent folder (demo mailbox).`;
+    case "skill.toggle":
+      return `Skill "${params.name || params.id}" has been updated to: ${params.status}.`;
+    case "automation.toggle":
+      return `Automation "${params.name || params.id}" has been ${params.enabled ? "enabled" : "disabled"}.`;
+    case "job.apply":
+      return `Application submitted for ${params.role} at ${params.company}.`;
     default:
       return "Action completed and verified by the executor.";
   }

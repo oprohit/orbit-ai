@@ -897,14 +897,181 @@ async function hExpense(_m: string, { runId }: Ctx): Promise<ChatContent> {
   };
 }
 
+function parseTaskAndDeadline(m: string): { title: string; deadline: Date | null; hasTime: boolean } {
+  let text = m
+    .replace(/^(?:please\s+)?(?:add|create|make|new|schedule|put|remind\s+me(?:\s+to)?)\s+(?:a\s+)?(?:task|to-?do|reminder|item)?(?:\s+(?:to|for|about|:|that)\s+|\s+)/i, "")
+    .trim();
+
+  if (!text) text = m.trim();
+
+  let deadline: Date | null = null;
+  let hasTime = false;
+
+  const isTomorrow = /\btomorrow\b/i.test(m);
+  const isToday = /\btoday|tonight\b/i.test(m);
+  let dayOffset = isTomorrow ? 1 : 0;
+
+  const dayMatch = m.match(/\b(?:by|on|next)\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i);
+  if (dayMatch) {
+    const targetDay = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"].indexOf(dayMatch[1].toLowerCase());
+    const now = new Date();
+    const curDay = now.getDay();
+    let diff = (targetDay - curDay + 7) % 7;
+    if (diff === 0) diff = 7;
+    dayOffset = diff;
+    hasTime = true;
+  }
+
+  const timeRegexes = [
+    /\b(?:at|by|for)?\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b(?:\s*(?:today|tomorrow|tonight))?/i,
+    /\b(?:today|tomorrow|tonight)\s+(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b/i,
+    /\bat\s+(\d{1,2})(?::(\d{2}))?\b/i,
+    /\b(?:in\s+the\s+)?(morning|afternoon|evening|night)\b/i,
+  ];
+
+  let matchedTimeStr = "";
+  let hour = 18;
+  let minute = 0;
+
+  for (const re of timeRegexes) {
+    const match = text.match(re);
+    if (match) {
+      matchedTimeStr = match[0];
+      hasTime = true;
+      if (match[1] && /^\d+$/.test(match[1])) {
+        hour = parseInt(match[1], 10);
+        minute = match[2] ? parseInt(match[2], 10) : 0;
+        const ampm = match[3]?.toLowerCase();
+        if (ampm === "pm" && hour < 12) hour += 12;
+        if (ampm === "am" && hour === 12) hour = 0;
+      } else if (match[1]) {
+        const part = match[1].toLowerCase();
+        if (part === "morning") hour = 9;
+        else if (part === "afternoon") hour = 14;
+        else if (part === "evening") hour = 18;
+        else if (part === "night") hour = 21;
+      }
+      break;
+    }
+  }
+
+  if (isTomorrow || isToday) {
+    hasTime = true;
+  }
+
+  if (hasTime) {
+    deadline = at(dayOffset, hour, minute);
+  }
+
+  let cleanTitle = text;
+  if (matchedTimeStr) {
+    cleanTitle = cleanTitle.replace(matchedTimeStr, " ");
+  }
+  cleanTitle = cleanTitle
+    .replace(/\b(?:today|tomorrow|tonight)\b/gi, " ")
+    .replace(/\b(?:by|on|next)\s+(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/gi, " ")
+    .replace(/\s+(?:at|by|on|for|due)\s*$/gi, "")
+    .replace(/^[,\s.:;]+|[,\s.:;]+$/g, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+
+  if (!cleanTitle) cleanTitle = "New task";
+  cleanTitle = cleanTitle.charAt(0).toUpperCase() + cleanTitle.slice(1);
+
+  return { title: cleanTitle, deadline, hasTime };
+}
+
 async function hNewTask(m: string, { runId }: Ctx): Promise<ChatContent> {
-  const title = m.replace(/^(please\s+)?(add|create|make|new)\s+(a\s+)?(task|to-?do)(\s+to\s+|:|\s+)/i, "").trim() || "New task";
-  const r = await execTool("task.create", { title, source: "User", status: "inbox" }, { runId });
+  const { title, deadline, hasTime } = parseTaskAndDeadline(m);
+
+  if (hasTime && deadline) {
+    const r = await execTool("task.create", {
+      title,
+      source: "User",
+      status: "planned",
+      deadline,
+    }, { runId });
+    const when = `${fmtDay(deadline)} at ${fmtTime(deadline)}`;
+    return {
+      text: r.ok
+        ? `Added **${title}** to your tasks scheduled for **${when}**.`
+        : `Couldn't create the task: ${r.summary}`,
+      blocks: r.ok ? [{ type: "tasks", items: taskBlock([r.data as (typeof tasks.$inferSelect)]) }] : [],
+    };
+  }
+
+  // User simply gave a task name without time
+  const r = await execTool("task.create", {
+    title,
+    source: "User",
+    status: "inbox",
+    deadline: null,
+  }, { runId });
+
   return {
-    text: r.ok ? `Added to your inbox: “${title}”.` : `Couldn't create the task: ${r.summary}`,
-    blocks: r.ok ? [{ type: "tasks", items: taskBlock([r.data as (typeof tasks.$inferSelect)]) }] : [],
+    text: r.ok
+      ? `Added **${title}** to your task inbox.\n\nWhat time would you like to set a reminder or deadline for this task?`
+      : `Couldn't create the task: ${r.summary}`,
+    blocks: r.ok
+      ? [
+          { type: "tasks", items: taskBlock([r.data as (typeof tasks.$inferSelect)]) },
+          {
+            type: "chips",
+            chips: [
+              { label: "Remind me today at 5:00 PM", send: `Set reminder for ${title} today at 5:00 PM` },
+              { label: "Remind me tomorrow at 9:00 AM", send: `Set reminder for ${title} tomorrow at 9:00 AM` },
+              { label: "No reminder (keep in inbox)", send: `Keep ${title} in inbox without reminder` },
+            ],
+          },
+        ]
+      : [],
   };
 }
+
+async function hSetTaskReminder(m: string, _ctx: Ctx): Promise<ChatContent> {
+  if (/no reminder|keep in inbox|without reminder/i.test(m)) {
+    return {
+      text: "Got it! Kept in your inbox without a reminder. You can schedule it anytime from the Tasks dashboard.",
+      blocks: [],
+    };
+  }
+
+  const { title: parsedTaskName, deadline, hasTime } = parseTaskAndDeadline(m);
+  if (!hasTime || !deadline) {
+    return {
+      text: "Please specify what time you'd like the reminder (for example: *today at 5:00 PM* or *tomorrow at 9:00 AM*).",
+      blocks: [],
+    };
+  }
+
+  const recentTasks = await db.select().from(tasks).orderBy(desc(tasks.createdAt)).limit(10);
+  let target = recentTasks.find((t) =>
+    parsedTaskName.length > 2 && t.title.toLowerCase().includes(parsedTaskName.toLowerCase())
+  );
+  if (!target) {
+    target = recentTasks.find((t) => t.source === "User" && !t.deadline) || recentTasks.find((t) => t.source === "User") || recentTasks[0];
+  }
+
+  if (target) {
+    await db.update(tasks).set({
+      deadline,
+      status: "planned",
+    }).where(eq(tasks.id, target.id));
+
+    const updated = { ...target, deadline, status: "planned" };
+    const when = `${fmtDay(deadline)} at ${fmtTime(deadline)}`;
+    return {
+      text: `Set reminder for **${target.title}** to **${when}**. It's updated on your Tasks dashboard.`,
+      blocks: [{ type: "tasks", items: taskBlock([updated as any]) }],
+    };
+  }
+
+  return {
+    text: `Scheduled reminder for ${fmtDay(deadline)} at ${fmtTime(deadline)}.`,
+    blocks: [],
+  };
+}
+
 
 async function hAffirm(_m: string, ctx: Ctx): Promise<ChatContent> {
   const pending = await db.select().from(approvals).where(eq(approvals.status, "pending")).orderBy(approvals.createdAt);
@@ -955,6 +1122,7 @@ const ROUTES: { re: RegExp; run: (m: string, ctx: Ctx) => Promise<ChatContent> }
   { re: /(event|meeting|appointment).{0,45}(tomorrow|today|tonight)|add (it\b|the event|an? (event|meeting))/i, run: hCalendarEvent },
   { re: /(important (today|now|emails)|what'?s important|catch me up|briefing|take care of|what should i (do|take)|what'?s (up|on) (today|now)|priorit)/i, run: hBriefing },
   { re: /^(yes|yeah|yep|sure|go ahead|do it|ok|okay|please do)\b/i, run: hAffirm },
+  { re: /(?:set|add|schedule|update)?\s*(?:reminder|deadline|time)\s*(?:for|to|on)\b|(?:remind\s+me\s+(?:at|today|tomorrow|in)|keep\s+.{1,30}in\s+inbox)/i, run: hSetTaskReminder },
   { re: /remind/i, run: hRemind },
   { re: /(junk|free up|clean( up)?|storage|disk space)/i, run: hCleanup },
   { re: /₹|payment|transfer|send .*rs\b|\bupi\b/i, run: hPayment },
@@ -969,7 +1137,7 @@ const ROUTES: { re: RegExp; run: (m: string, ctx: Ctx) => Promise<ChatContent> }
   { re: /(classroom|assignment)/i, run: hClassroom },
   { re: /(video|youtube|tutorial)/i, run: hYouTube },
   { re: /(expense|spending|spent|budget|how much (did i )?(spend|spent))|\bmoney\b/i, run: hExpense },
-  { re: /^(new |add |create )?(a )?(task|to-?do|todo)\b/i, run: hNewTask },
+  { re: /^(?:new|add|create|schedule|put)\s+(?:a\s+)?(?:task|to-?do|reminder)\b|^(?:a\s+)?task\s+to\b|completing\s+homework\b/i, run: hNewTask },
   { re: /^(hi|hello|hey|good (morning|afternoon|evening))\b/i, run: hGreeting },
 ];
 

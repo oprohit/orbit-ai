@@ -6,7 +6,7 @@ import {
   automations, connectors, expenseTransactions, goals, goalMilestones, memoryEntries,
   notifications, profiles, skills, tasks,
 } from "@/db/schema";
-import { execTool } from "@/lib/executor";
+import { execTool, createApproval } from "@/lib/executor";
 import { resetPolicies, setPolicy } from "@/lib/policy";
 import { logAudit } from "@/lib/audit";
 
@@ -52,14 +52,39 @@ export async function POST(req: NextRequest) {
       }
 
       case "skill": {
-        await db.update(skills).set({ status: b.status }).where(eq(skills.id, id));
-        return NextResponse.json({ ok: true });
+        const [sk] = await db.select().from(skills).where(eq(skills.id, id));
+        const newStatus = b.status === "disabled" ? "disabled" : "enabled";
+        const name = sk?.name || id;
+        const action = `${newStatus === "disabled" ? "Disable" : "Enable"} skill — ${name}`;
+        const approval = await createApproval({
+          toolId: "skill.toggle",
+          action,
+          params: { id, name, status: newStatus },
+          reason: `You requested to ${newStatus} the skill “${name}”. Skills change agent capabilities and require confirmation.`,
+          riskLevel: "medium",
+        });
+        return NextResponse.json({ ok: true, approvalRequired: true, approvalId: approval.id, action });
       }
 
       case "automation": {
-        await db.update(automations).set({ enabled: !!b.enabled }).where(eq(automations.id, id));
-        await logAudit({ action: `automation.${b.enabled ? "enabled" : "disabled"} — ${id}`, authorization: "approved", resultSummary: "Explicit user opt-in recorded" });
-        return NextResponse.json({ ok: true });
+        const [auto] = await db.select().from(automations).where(eq(automations.id, id));
+        const willEnable = !!b.enabled;
+        const name = auto?.name || id;
+        const action = `${willEnable ? "Enable" : "Disable"} automation — ${name}`;
+        const approval = await createApproval({
+          toolId: "automation.toggle",
+          action,
+          params: { id, name, enabled: willEnable },
+          reason: `You requested to ${willEnable ? "enable" : "disable"} the automation “${name}”. Automations run recurring scheduled tasks and require confirmation.`,
+          riskLevel: "medium",
+        });
+        return NextResponse.json({ ok: true, approvalRequired: true, approvalId: approval.id, action });
+      }
+
+      case "job.apply": {
+        const res = await execTool("job.apply", { role: b.role, company: b.company }, { reason: "User applied via Orbit" });
+        await logAudit({ action: `job.apply — ${b.role} at ${b.company}`, authorization: "allowed" });
+        return NextResponse.json(res);
       }
 
       case "policy": {

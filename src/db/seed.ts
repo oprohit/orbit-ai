@@ -104,6 +104,9 @@ export async function seedDemo() {
     ["filesystem.delete", "Files · Delete", "localfiles", "Delete files (destructive)", "critical", true],
     ["payment.prepare", "Payments · Prepare", "payments", "Prepare a sandbox transaction", "medium", false],
     ["payment.execute", "Payments · Execute", "payments", "Execute a payment (financial)", "critical", true],
+    ["skill.toggle", "Skills · Toggle", null, "Enable or disable an agent skill", "medium", true],
+    ["automation.toggle", "Automations · Toggle", null, "Enable or disable a scheduled automation", "medium", true],
+    ["job.apply", "Jobs · Apply", "jobs", "Submit application via Orbit in background", "low", false],
   ];
   await db.insert(s.tools).values(tools.map(([id, name, connectorId, description, riskLevel, requiresApproval]) => ({
     id, name, connectorId, description, riskLevel, requiresApproval, enabled: true,
