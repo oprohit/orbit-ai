@@ -834,14 +834,16 @@ async function hWeather(_m: string, { runId }: Ctx): Promise<ChatContent> {
 
 async function hJoke(_m: string, { runId }: Ctx): Promise<ChatContent> {
   const res = await execTool("public.joke", {}, { runId });
-  const d = res.data as any;
+  const d = (res.data as any) || {};
+  const setup = d.setup || "Why do programmers prefer dark mode?";
+  const punchline = d.punchline || "Because light attracts bugs!";
   return {
-    text: `${d.setup}\n\n**${d.punchline}**`,
+    text: `${setup}\n\n**${punchline}**`,
     blocks: [
       {
         type: "result",
         title: "😄 Joke of the Moment",
-        lines: [d.setup, `→ ${d.punchline}`],
+        lines: [setup, `→ ${punchline}`],
       },
     ],
   };
@@ -849,14 +851,15 @@ async function hJoke(_m: string, { runId }: Ctx): Promise<ChatContent> {
 
 async function hAdvice(_m: string, { runId }: Ctx): Promise<ChatContent> {
   const res = await execTool("public.advice", {}, { runId });
-  const d = res.data as any;
+  const d = (res.data as any) || {};
+  const advice = d.advice || "Focus on small consistent daily wins rather than overnight perfection.";
   return {
-    text: `💡 Daily Advice: "${d.advice}"`,
+    text: `💡 Daily Advice: "${advice}"`,
     blocks: [
       {
         type: "result",
         title: "💡 Daily Advice & Wisdom",
-        lines: [d.advice],
+        lines: [advice],
       },
     ],
   };

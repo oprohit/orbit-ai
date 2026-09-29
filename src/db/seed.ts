@@ -66,6 +66,7 @@ export async function seedDemo() {
     { id: "jobs", name: "Jobs", provider: "Public job boards", category: "Career", status: "connected", authType: "api_key", scopes: [], capabilities: ["Search listings", "Normalize results"], description: "Official/public job sources only — no scraping.", freeTier: "Free public listings", rateLimit: "Polite crawl, 60 req/h", docsUrl: "https://github.com/public-apis", notes: "", lastSync: ago(1), connectedAt: ago(9) },
     { id: "payments", name: "Payments (Sandbox)", provider: "Sandbox PSP", category: "Finance", status: "connected", authType: "sandbox", scopes: ["payments.sandbox"], capabilities: ["Prepare transaction", "Execute (approval + confirm)"], description: "Sandbox UPI/PSP. No real money ever moves in demo mode.", freeTier: "Sandbox — unlimited fake funds", rateLimit: "10 req/min", docsUrl: "https://developer.razorpay.com", notes: "Merchant/UPI sandbox. Never a personal P2P banking API. Banking credentials are never stored.", lastSync: ago(2), connectedAt: ago(15) },
     { id: "localfiles", name: "Local Files (Desktop Agent)", provider: "Orbit Desktop Agent", category: "System", status: "available", authType: "local_agent", scopes: ["allowlisted local tools"], capabilities: ["Scan", "Search", "Archive", "Delete (approval)"], description: "Optional local companion. Allowlisted tools, path restrictions, approvals for destructive actions. No shell access.", freeTier: "Local — no cost", rateLimit: "Local", docsUrl: "internal", notes: "Runs on your machine; the web app authenticates to it. Deletion is always CRITICAL + approval.", lastSync: null, connectedAt: null },
+    { id: "publicapis", name: "Public APIs", provider: "public-apis", category: "Info", status: "connected", authType: "api_key", scopes: [], capabilities: ["Random Jokes", "Daily Advice"], description: "Collection of curated free public APIs (no auth required).", freeTier: "Free public endpoints", rateLimit: "Generous public limits", docsUrl: "https://github.com/public-apis/public-apis", notes: "", lastSync: now, connectedAt: ago(5) },
   ];
   await db.insert(s.connectors).values(conns);
 
@@ -92,6 +93,8 @@ export async function seedDemo() {
     ["jobs.search", "Jobs · Search", "jobs", "Search approved job sources", "low", false],
     ["weather.get", "Weather · Get", "weather", "Current conditions", "low", false],
     ["news.search", "News · Search", "news", "Headlines & search", "low", false],
+    ["public.joke", "Jokes · Random", "publicapis", "Get random jokes from official-joke-api", "low", false],
+    ["public.advice", "Advice · Daily", "publicapis", "Get daily advice from adviceslip API", "low", false],
     ["search.web", "Web · Search", null, "Registered web search provider", "low", false],
     ["document.read", "Documents · Read", "drive", "Parse & analyze uploaded documents", "low", false],
     ["task.create", "Tasks · Create", null, "Create a task (reversible, internal)", "medium", false],
