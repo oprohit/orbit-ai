@@ -442,9 +442,6 @@ export async function runTool(toolId: string, params: Record<string, any>, _ctx?
         .trim();
       if (!song || song.length < 2) song = rawSong || "relaxing music";
 
-      let ytUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(song)}`;
-      let musicUrl = `https://music.youtube.com/search?q=${encodeURIComponent(song)}`;
-      const spotifyUrl = `https://open.spotify.com/search/${encodeURIComponent(song)}`;
       let resolvedVideoId: string | null = null;
       const headers = {
         "Content-Type": "application/json",
