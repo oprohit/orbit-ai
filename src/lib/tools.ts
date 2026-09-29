@@ -285,15 +285,86 @@ export async function runTool(toolId: string, params: Record<string, any>, _ctx?
       return { ok: true, summary: "3 headlines retrieved", data: [] };
     }
     case "youtube.search": {
-      const q = String(params.query ?? "");
+      const q = String(params.query ?? "topic");
+      const isDS = /data structure|tree|pointer|avl|hash|dsa|algorithm/i.test(q);
+      const isReact = /react|frontend|web/i.test(q);
+
+      const data = isDS
+        ? [
+            {
+              title: "Mastering Data Structures & Algorithms",
+              channel: "Abdul Bari",
+              duration: "Full Playlist",
+              why: "The best conceptual breakdown of trees, pointers, recursion, and AVL trees.",
+              url: `https://www.youtube.com/results?search_query=${encodeURIComponent("abdul bari data structures " + q)}`,
+            },
+            {
+              title: "Data Structures and Algorithms in 2024",
+              channel: "freeCodeCamp",
+              duration: "8:15:30",
+              why: "Comprehensive deep-dive with animated memory diagrams.",
+              url: `https://www.youtube.com/results?search_query=${encodeURIComponent("freecodecamp data structures " + q)}`,
+            },
+            {
+              title: "Binary Trees, Pointers & AVL Rotations",
+              channel: "NeetCode",
+              duration: "24:18",
+              why: "Visual pattern matching and practical problem-solving.",
+              url: `https://www.youtube.com/results?search_query=${encodeURIComponent("neetcode " + q)}`,
+            },
+          ]
+        : isReact
+        ? [
+            {
+              title: "React Full Modern Tutorial (2024 Edition)",
+              channel: "freeCodeCamp",
+              duration: "11:42:00",
+              why: "Full-stack project building with modern React 19 and hooks.",
+              url: `https://www.youtube.com/results?search_query=freecodecamp+react+tutorial`,
+            },
+            {
+              title: "React & State Management Masterclass",
+              channel: "Net Ninja",
+              duration: "Playlist",
+              why: "Modular bite-sized lectures covering components and state.",
+              url: `https://www.youtube.com/results?search_query=net+ninja+react`,
+            },
+            {
+              title: "React in 100 Seconds",
+              channel: "Fireship",
+              duration: "2:15",
+              why: "Lightning-fast conceptual overview before diving deep.",
+              url: `https://www.youtube.com/results?search_query=fireship+react`,
+            },
+          ]
+        : [
+            {
+              title: `${q} — Full Course Tutorial`,
+              channel: "freeCodeCamp",
+              duration: "4:30:00",
+              why: "Complete foundation lecture with real-world examples.",
+              url: `https://www.youtube.com/results?search_query=${encodeURIComponent(q + " full course tutorial")}`,
+            },
+            {
+              title: `${q} Concept Deep Dive`,
+              channel: "Abdul Bari",
+              duration: "44:02",
+              why: "Clear theoretical intuition with diagrammatic breakdowns.",
+              url: `https://www.youtube.com/results?search_query=${encodeURIComponent(q + " lecture abdul bari")}`,
+            },
+            {
+              title: `${q} Fast Intuition`,
+              channel: "Fireship",
+              duration: "11:30",
+              why: "High-yield overview before tackling detailed problems.",
+              url: `https://www.youtube.com/results?search_query=${encodeURIComponent(q + " fireship")}`,
+            },
+          ];
+
       return {
         ok: true,
-        summary: "3 videos found",
-        data: [
-          { title: `${q || "Topic"} — Full 20-minute explanation`, channel: "DevSimplify", duration: "20:14", why: "Matches requested length, high production quality" },
-          { title: `${q || "Topic"} in one sitting (lecture)`, channel: "Abdul Bari", duration: "44:02", why: "Deep dive if you want the theory" },
-          { title: `${q || "Topic"} — quick intuition`, channel: "Fireship", duration: "11:31", why: "Fast overview before the long one" },
-        ],
+        summary: `${data.length} curated video tutorials found`,
+        data,
       };
     }
 

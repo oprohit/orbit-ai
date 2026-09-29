@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { eq } from "drizzle-orm";
+import { eq, asc } from "drizzle-orm";
 import { randomUUID } from "crypto";
 import { db } from "@/db";
 import {
@@ -28,15 +28,69 @@ export async function POST(req: NextRequest) {
           status: b.status,
           completedAt: done ? new Date() : null,
         }).where(eq(tasks.id, id));
-        // Stride points: completing a points task advances its goal
-        if (done && t.points && t.goalId) {
+
+        // Sync Goal progress if this task is linked to a goal
+        if (t.goalId) {
           const [g] = await db.select().from(goals).where(eq(goals.id, t.goalId));
           if (g) {
-            const nv = (g.currentValue ?? 0) + t.points;
-            await db.update(goals).set({ currentValue: nv, updatedAt: new Date() }).where(eq(goals.id, g.id));
-            await db.insert(notifications).values({ id: randomUUID(), kind: "goal_milestone", title: `Stride progress: +${t.points} pts`, body: `Completed “${t.title}” — goal now at ${nv} points.`, read: false, link: "/goals" });
+            const allGoalTasks = await db.select().from(tasks).where(eq(tasks.goalId, g.id));
+            const completedCount = allGoalTasks.filter((item) => 
+              (item.id === t.id ? b.status : item.status) === "completed"
+            ).length;
+
+            const pointsSum = allGoalTasks.reduce((sum, item) => {
+              const st = item.id === t.id ? b.status : item.status;
+              return sum + (st === "completed" ? (item.points ?? 0) : 0);
+            }, 0);
+
+            const nv = g.unit === "points" ? pointsSum : completedCount;
+            const nextPending = allGoalTasks.find((item) => 
+              (item.id === t.id ? b.status : item.status) !== "completed"
+            );
+            const nextAction = nextPending ? nextPending.title : "All objectives completed! 🎉";
+
+            await db.update(goals).set({
+              currentValue: nv,
+              nextAction,
+              status: nv >= (g.targetValue || allGoalTasks.length) ? "completed" : "active",
+              updatedAt: new Date(),
+            }).where(eq(goals.id, g.id));
+
+            // Proportional milestone progress
+            const ms = await db.select().from(goalMilestones).where(eq(goalMilestones.goalId, g.id)).orderBy(asc(goalMilestones.seq));
+            if (ms.length > 0) {
+              const totalTasks = Math.max(1, allGoalTasks.length);
+              const msToComplete = Math.floor((completedCount / totalTasks) * ms.length);
+              for (let i = 0; i < ms.length; i++) {
+                const targetStatus = i < msToComplete ? "done" : (i === msToComplete && completedCount < totalTasks ? "in_progress" : "pending");
+                if (ms[i].status !== targetStatus) {
+                  await db.update(goalMilestones).set({ status: targetStatus }).where(eq(goalMilestones.id, ms[i].id));
+                }
+              }
+            }
+
+            if (done && t.points) {
+              await db.insert(notifications).values({ 
+                id: randomUUID(), 
+                kind: "goal_milestone", 
+                title: `Stride progress: +${t.points} pts`, 
+                body: `Completed “${t.title}” — goal now at ${nv} points.`, 
+                read: false, 
+                link: "/goals" 
+              });
+            } else if (done) {
+              await db.insert(notifications).values({ 
+                id: randomUUID(), 
+                kind: "goal_milestone", 
+                title: `Goal progress: ${completedCount}/${g.targetValue ?? allGoalTasks.length}`, 
+                body: `Completed “${t.title}” in ${g.title}.`, 
+                read: false, 
+                link: "/goals" 
+              });
+            }
           }
         }
+
         await logAudit({ action: `task.status — ${t.title} → ${b.status}`, taskId: id, authorization: "allowed" });
         return NextResponse.json({ ok: true });
       }
@@ -48,7 +102,21 @@ export async function POST(req: NextRequest) {
       }
 
       case "milestone": {
-        await db.update(goalMilestones).set({ status: b.status }).where(eq(goalMilestones.id, id));
+        const [m] = await db.select().from(goalMilestones).where(eq(goalMilestones.id, id));
+        if (m) {
+          await db.update(goalMilestones).set({ status: b.status }).where(eq(goalMilestones.id, id));
+          if (m.goalId) {
+            const allMs = await db.select().from(goalMilestones).where(eq(goalMilestones.goalId, m.goalId));
+            const doneMs = allMs.filter((item) => (item.id === m.id ? b.status : item.status) === "done").length;
+            const [g] = await db.select().from(goals).where(eq(goals.id, m.goalId));
+            if (g && g.unit === "tasks") {
+              const allGoalTasks = await db.select().from(tasks).where(eq(tasks.goalId, g.id));
+              const completedTasksCount = allGoalTasks.filter((t) => t.status === "completed").length;
+              const val = Math.max(completedTasksCount, doneMs);
+              await db.update(goals).set({ currentValue: val, updatedAt: new Date() }).where(eq(goals.id, g.id));
+            }
+          }
+        }
         return NextResponse.json({ ok: true });
       }
 

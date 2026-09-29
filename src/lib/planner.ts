@@ -961,12 +961,34 @@ async function hAdvice(_m: string, { runId }: Ctx): Promise<ChatContent> {
 }
 
 async function hYouTube(m: string, { runId }: Ctx): Promise<ChatContent> {
-  const q = m.replace(/find me (a |an )?(about|of)?/i, "").replace(/explanation of|video about|tutorial on|find/gi, "").trim();
-  const res = await execTool("youtube.search", { query: q || m }, { runId });
+  const q = m
+    .replace(/find me (a |an )?(about|of)?/i, "")
+    .replace(/explanation of|video about|tutorial on|study materials? (?:for|about)?|sources? to study|videos? (?:for|about)?|how (?:to|do i) master|master\s+/gi, "")
+    .trim();
+  const topic = q || "Data Structures and Algorithms";
+  const res = await execTool("youtube.search", { query: topic }, { runId });
   const vids = (res.data as any[]) ?? [];
+  const searchUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(topic + " full course tutorial")}`;
+
   return {
-    text: `Found ${vids.length} videos for “${q || m}” — the first one matches your requested length.`,
-    blocks: [{ type: "result", title: "Videos", lines: vids.map((v) => `${v.title} — ${v.channel} · ${v.duration} — ${v.why}`) }],
+    text: `Here are curated study resources and YouTube video tutorials for **“${topic}”** to help you master the topic:`,
+    blocks: [
+      {
+        type: "result",
+        title: `📺 YouTube Tutorials & Study Guides: ${topic}`,
+        lines: [
+          ...vids.map((v) => `▶ ${v.title} (${v.channel} · ${v.duration})\n   ${v.why}\n   URL: ${v.url || searchUrl}`),
+          `🔍 Full YouTube Playlist: ${searchUrl}`,
+        ],
+      },
+      {
+        type: "chips",
+        chips: [
+          { label: "View Goals Roadmap", send: "Show my goals" },
+          { label: "What's my next action?", send: "What's my next action?" },
+        ],
+      },
+    ],
   };
 }
 
@@ -1231,7 +1253,7 @@ const ROUTES: { re: RegExp; run: (m: string, ctx: Ctx) => Promise<ChatContent> }
   { re: /summarize|summarise/i, run: hSummarize },
   { re: /(project report|find (my )?(files?|documents?))|\bdrive\b/i, run: hDrive },
   { re: /(classroom|assignment)/i, run: hClassroom },
-  { re: /(video|youtube|tutorial)/i, run: hYouTube },
+  { re: /(?:study\s+(?:materials?|resources?|sources?)|how\s+to\s+master|master\s+the\s+topic|videos?|youtube|tutorial|lecture)/i, run: hYouTube },
   { re: /(expense|spending|spent|budget|how much (did i )?(spend|spent))|\bmoney\b/i, run: hExpense },
   { re: /^(?:new|add|create|schedule|put)\s+(?:a\s+)?(?:task|to-?do|reminder)\b|^(?:a\s+)?task\s+to\b|completing\s+homework\b/i, run: hNewTask },
   { re: /^(hi|hello|hey|good (morning|afternoon|evening))\b/i, run: hGreeting },

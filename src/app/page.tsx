@@ -21,12 +21,13 @@ export default async function Home() {
   const dayEnd = new Date(now);
   dayEnd.setHours(23, 59, 59, 999);
 
-  const [todays, emails, pending, goalRows, dueSoon] = await Promise.all([
+  const [todays, emails, pending, goalRows, dueSoon, allGoalTasks] = await Promise.all([
     db.select().from(calendarEvents).where(and(gte(calendarEvents.startsAt, dayStart), lte(calendarEvents.startsAt, dayEnd), eq(calendarEvents.status, "confirmed"))).orderBy(calendarEvents.startsAt),
     db.select().from(emailItems).where(eq(emailItems.read, false)).orderBy(desc(emailItems.ts)).limit(12),
     db.select().from(approvals).where(eq(approvals.status, "pending")).orderBy(approvals.createdAt),
     db.select().from(goals).where(eq(goals.status, "active")),
     db.select().from(tasks).where(and(gte(tasks.deadline, now), lte(tasks.deadline, new Date(now.getTime() + 48 * 3600e3)), eq(tasks.status, "planned"))).orderBy(tasks.deadline).limit(3),
+    db.select().from(tasks),
   ]);
 
   const importantEmails = emails.filter((e) => e.classification === "critical" || e.classification === "important");
@@ -123,12 +124,18 @@ export default async function Home() {
             </div>
             <div className="space-y-3">
               {goalRows.map((g) => {
-                const pct = Math.round(((g.currentValue ?? 0) / (g.targetValue || 1)) * 100);
+                const gTasks = allGoalTasks.filter((t) => t.goalId === g.id);
+                const completedCount = gTasks.filter((t) => t.status === "completed").length;
+                const pointsSum = gTasks.reduce((acc, t) => acc + (t.status === "completed" ? (t.points ?? 0) : 0), 0);
+                const currentVal = g.unit === "points"
+                  ? (pointsSum > 0 ? pointsSum : (g.currentValue ?? 0))
+                  : (gTasks.length > 0 ? completedCount : (g.currentValue ?? 0));
+                const pct = Math.round((currentVal / (g.targetValue || (gTasks.length || 1))) * 100);
                 return (
                   <div key={g.id}>
                     <div className="mb-1 flex items-center justify-between text-[12.5px]">
                       <span className="text-ink">{g.title}</span>
-                      <span className="font-display text-[12px] text-muted">{g.currentValue}/{g.targetValue} <span className="text-faint">{g.unit}</span></span>
+                      <span className="font-display text-[12px] text-muted">{currentVal}/{g.targetValue} <span className="text-faint">{g.unit}</span></span>
                     </div>
                     <Progress value={pct} tone={pct >= 70 ? "ok" : "accent"} />
                   </div>
