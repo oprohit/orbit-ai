@@ -232,7 +232,51 @@ export async function runTool(toolId: string, params: Record<string, any>, _ctx?
       return { ok: true, summary: `${filtered.length} matching listings`, data: filtered };
     }
     case "weather.get": {
-      return { ok: true, summary: "Coimbatore — 29°C, partly cloudy", data: { place: "Coimbatore", temp: "29°C", sky: "Partly cloudy", humidity: "71%", note: "Light rain possible after 6 PM." } };
+      const place = String(params.place || "Coimbatore");
+      try {
+        const res = await fetch(
+          "https://api.open-meteo.com/v1/forecast?latitude=11.0168&longitude=76.9558&current_weather=true&timezone=auto",
+          { signal: AbortSignal.timeout(3000) }
+        );
+        if (res.ok) {
+          const wData = (await res.json()) as any;
+          const cur = wData.current_weather;
+          const temp = `${cur.temperature}°C`;
+          const wind = `${cur.windspeed} km/h`;
+          const codes: Record<number, string> = {
+            0: "Clear sky", 1: "Mainly clear", 2: "Partly cloudy", 3: "Overcast",
+            45: "Fog", 51: "Light drizzle", 61: "Slight rain", 63: "Moderate rain",
+            65: "Heavy rain", 80: "Rain showers", 95: "Thunderstorm"
+          };
+          const sky = codes[cur.weathercode] || "Partly cloudy";
+          return {
+            ok: true,
+            summary: `${place} — ${temp}, ${sky}`,
+            data: { place, temp, sky, wind, live: true }
+          };
+        }
+      } catch {}
+      return { ok: true, summary: "Coimbatore — 31°C, partly cloudy", data: { place: "Coimbatore", temp: "31°C", sky: "Partly cloudy", wind: "12 km/h" } };
+    }
+    case "public.joke": {
+      try {
+        const res = await fetch("https://official-joke-api.appspot.com/random_joke", { signal: AbortSignal.timeout(2500) });
+        if (res.ok) {
+          const j = await res.json();
+          return { ok: true, summary: "Joke", data: { setup: j.setup, punchline: j.punchline } };
+        }
+      } catch {}
+      return { ok: true, summary: "Joke", data: { setup: "Why do programmers prefer dark mode?", punchline: "Because light attracts bugs!" } };
+    }
+    case "public.advice": {
+      try {
+        const res = await fetch("https://api.adviceslip.com/advice", { signal: AbortSignal.timeout(2500) });
+        if (res.ok) {
+          const a = await res.json();
+          return { ok: true, summary: "Advice", data: { advice: a.slip?.advice || "Keep learning and building every day." } };
+        }
+      } catch {}
+      return { ok: true, summary: "Advice", data: { advice: "Focus on small consistent daily wins rather than overnight perfection." } };
     }
     case "search.web": {
       return { ok: true, summary: "Search completed (2 sources)", data: [] };

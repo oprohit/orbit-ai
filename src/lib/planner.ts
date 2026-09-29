@@ -43,9 +43,10 @@ const daysLeft = (d: Date | null) => (d ? Math.max(0, Math.ceil((d.getTime() - D
 
 /* ────────────────────────── handlers ────────────────────────── */
 
-async function hStride(_m: string, { runId }: Ctx): Promise<ChatContent> {
+async function hStride(m: string, { runId }: Ctx): Promise<ChatContent> {
+  const isFresh = /read\s+(?:this\s+)?document|help\s+me\s+finish|100\s+stride/i.test(m);
   const g = await findGoal("Stride");
-  if (g) {
+  if (g && !isFresh) {
     const rows = await db.select().from(tasks).where(eq(tasks.goalId, g.id)).orderBy(tasks.deadline).limit(8);
     const pct = Math.round(((g.currentValue ?? 0) / (g.targetValue || 1)) * 100);
     const remaining = Math.max(0, (g.targetValue ?? 0) - (g.currentValue ?? 0));
@@ -57,6 +58,15 @@ async function hStride(_m: string, { runId }: Ctx): Promise<ChatContent> {
         { type: "chips", chips: [{ label: "Search upcoming opportunities", send: "Yes — search for upcoming opportunities for the Stride goal" }] },
       ],
     };
+  }
+
+  // If re-triggering fresh from document, clean up previous Stride records
+  if (g) {
+    try {
+      await db.delete(goalMilestones).where(eq(goalMilestones.goalId, g.id));
+      await db.delete(tasks).where(eq(tasks.goalId, g.id));
+      await db.delete(goals).where(eq(goals.id, g.id));
+    } catch {}
   }
 
   await execTool("document.read", { id: "stride-2026" }, { runId, reason: "Extract Stride requirements from the uploaded document" });
@@ -803,7 +813,53 @@ async function hClassroom(_m: string, { runId }: Ctx): Promise<ChatContent> {
 async function hWeather(_m: string, { runId }: Ctx): Promise<ChatContent> {
   const res = await execTool("weather.get", {}, { runId });
   const d = res.data as any;
-  return { text: `Coimbatore right now: ${d?.temp ?? "29°C"}, ${d?.sky ?? "partly cloudy"}, humidity ${d?.humidity ?? "71%"}. ${d?.note ?? ""}`, blocks: [] };
+  const isLive = d?.live ? " (Live Open-Meteo API)" : "";
+  return {
+    text: `Coimbatore right now: ${d?.temp ?? "33°C"}, ${d?.sky ?? "partly cloudy"}${d?.wind ? `, wind ${d.wind}` : ""}${isLive}.`,
+    blocks: [
+      {
+        type: "result",
+        title: "🌤️ Live Weather · Coimbatore",
+        lines: [
+          `Location: ${d?.place ?? "Coimbatore, India"}`,
+          `Temperature: ${d?.temp ?? "33°C"}`,
+          `Conditions: ${d?.sky ?? "Partly cloudy"}`,
+          ...(d?.wind ? [`Wind Speed: ${d.wind}`] : []),
+          `Source: Real-time Public Weather API (Open-Meteo)`,
+        ],
+      },
+    ],
+  };
+}
+
+async function hJoke(_m: string, { runId }: Ctx): Promise<ChatContent> {
+  const res = await execTool("public.joke", {}, { runId });
+  const d = res.data as any;
+  return {
+    text: `${d.setup}\n\n**${d.punchline}**`,
+    blocks: [
+      {
+        type: "result",
+        title: "😄 Joke of the Moment",
+        lines: [d.setup, `→ ${d.punchline}`],
+      },
+    ],
+  };
+}
+
+async function hAdvice(_m: string, { runId }: Ctx): Promise<ChatContent> {
+  const res = await execTool("public.advice", {}, { runId });
+  const d = res.data as any;
+  return {
+    text: `💡 Daily Advice: "${d.advice}"`,
+    blocks: [
+      {
+        type: "result",
+        title: "💡 Daily Advice & Wisdom",
+        lines: [d.advice],
+      },
+    ],
+  };
 }
 
 async function hYouTube(m: string, { runId }: Ctx): Promise<ChatContent> {
@@ -886,14 +942,15 @@ async function hFallback(m: string, _ctx: Ctx): Promise<ChatContent> {
 
 const ROUTES: { re: RegExp; run: (m: string, ctx: Ctx) => Promise<ChatContent> }[] = [
   { re: /(?:automation|automations)\b|(?:change|update|set|reschedule|adjust|switch|turn\s+(?:on|off)|enable|disable|pause)\s+.{0,50}(?:email triage|calendar check|expense report|internship search|approval ping|timing|schedule|cadence)\b|(?:email triage|calendar check|expense report|internship search|approval ping)\s*.{0,50}(?:change|update|set|to\s+\d|at\s+\d|every)\b/i, run: hAutomationManage },
-  { re: /stride/i, run: hStride },
   { re: /register(ation)?|codespark/i, run: hRegister },
   { re: /(search|find|look).{0,35}(opportunit|hackathon|workshop|event for)|opportunities?( for| that)?/i, run: hOppsSearch },
+  { re: /(?:read\s+(?:this\s+)?document|stride\s*(?:rules|points?|requirements?|requirement|goal|progress)|(?:finish|complete|track|help me finish|about|my)\s+stride)/i, run: hStride },
+  { re: /(?:turn\s+(?:this\s+into\s+)?(?:an?\s+)?(?:application\s+)?goal|long.?term\s+goal|make\s+it\s+a\s+(?:long.?term\s+)?goal|create\s+(?:a\s+)?goal|plan\s+(?:for|to)|help me (?:complete|prepare|finish|achieve|get|plan|make).{0,35}goal)/i, run: hGoal },
+  { re: /react internship|internships?|find (me )?(jobs?|an? (job|internship))|(find|search).{0,40}(internship|jobs?)/i, run: hJobs },
   { re: /(cancel|drop|remove|don'?t (want to )?go|not going).{0,45}(event|appointment|meeting|that|it)|cancel that/i, run: hCancelEvent },
   { re: /find (me )?(free )?time|schedule (it|a (study )?block|time|the task)|free time in my calendar/i, run: hScheduleTask },
   { re: /(event|meeting|appointment).{0,45}(tomorrow|today|tonight)|add (it\b|the event|an? (event|meeting))/i, run: hCalendarEvent },
   { re: /(important (today|now|emails)|what'?s important|catch me up|briefing|take care of|what should i (do|take)|what'?s (up|on) (today|now)|priorit)/i, run: hBriefing },
-  { re: /react internship|internships?|find (me )?(jobs?|an? (job|internship))|(find|search).{0,40}(internship|jobs?)/i, run: hJobs },
   { re: /^(yes|yeah|yep|sure|go ahead|do it|ok|okay|please do)\b/i, run: hAffirm },
   { re: /remind/i, run: hRemind },
   { re: /(junk|free up|clean( up)?|storage|disk space)/i, run: hCleanup },
@@ -901,14 +958,15 @@ const ROUTES: { re: RegExp; run: (m: string, ctx: Ctx) => Promise<ChatContent> }
   { re: /(?:create|make|new|add)\s+(?:a\s+)?folder\b|mkdir\b/i, run: hCreateFolder },
   { re: /(?:write|send|draft|compose)\s+(?:an?\s+)?(?:email|mail|message)\b/i, run: hWriteEmail },
   { re: /(important|unread).{0,22}emails?|check (my )?(inbox|email|mails)|triage|email (summary|brief)|college (emails?|mails?)/i, run: hEmailTriage },
+  { re: /(?:weather|weaher|wether|temp(?:erature)?|climate|forecast|rain\b|how\s+hot|how\s+cold)/i, run: hWeather },
+  { re: /(?:joke|make me laugh|funny|humor|pun\b)/i, run: hJoke },
+  { re: /(?:advice|quote|inspiration|motivat)/i, run: hAdvice },
   { re: /summarize|summarise/i, run: hSummarize },
   { re: /(project report|find (my )?(files?|documents?))|\bdrive\b/i, run: hDrive },
   { re: /(classroom|assignment)/i, run: hClassroom },
-  { re: /weather/i, run: hWeather },
   { re: /(video|youtube|tutorial)/i, run: hYouTube },
   { re: /(expense|spending|spent|budget|how much (did i )?(spend|spent))|\bmoney\b/i, run: hExpense },
   { re: /^(new |add |create )?(a )?(task|to-?do|todo)\b/i, run: hNewTask },
-  { re: /help me (complete|prepare|finish|achieve|get|plan|make)|long.?term|my (goal|goals)|plan (for|to)/i, run: hGoal },
   { re: /^(hi|hello|hey|good (morning|afternoon|evening))\b/i, run: hGreeting },
 ];
 

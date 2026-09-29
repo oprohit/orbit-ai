@@ -33,6 +33,7 @@ async function wipe() {
 export async function seedDemo() {
   await wipe();
   const now = new Date();
+  const strideDeadline = at(126, 23, 59);
 
   /* ── profile & memory ── */
   await db.insert(s.profiles).values({
@@ -116,42 +117,16 @@ export async function seedDemo() {
   ];
   await db.insert(s.toolPermissions).values(perms.map(([toolId, level], i) => ({ id: `perm-${i}`, toolId, level })));
 
-  /* ── goals ── */
-  const strideDeadline = at(126, 23, 59);
-  await db.insert(s.goals).values([
-    {
-      id: "goal-stride", title: "Stride 2026", description: "Complete 100 Stride points before the academic year ends.",
-      status: "active", deadline: strideDeadline, targetValue: 100, currentValue: 40, unit: "points",
-      aiReasoning: "Parsed Stride_Rules_2026.pdf — 100 points required; current record 40. 126 days remaining. Plan targets 30 committed points with slack.",
-      nextAction: "Register for CodeSpark Hackathon before Friday",
-      sources: ["Stride_Rules_2026.pdf", "Stride portal (demo)"], createdAt: ago(2), updatedAt: now,
-    },
-    {
-      id: "goal-intern", title: "React Internship Applications", description: "Land a React internship this year.",
-      status: "active", deadline: at(180, 23, 59), targetValue: 10, currentValue: 3, unit: "applications",
-      aiReasoning: "Decomposed into resume → portfolio → search → apply → interview → follow-up. 3 applications already sent.",
-      nextAction: "Review React internship at XYZ Labs",
-      sources: ["User request"], createdAt: ago(12), updatedAt: ago(1),
-    },
-  ]);
-  await db.insert(s.goalMilestones).values([
-    { id: "ms-1", goalId: "goal-stride", title: "Academic", detail: "Workshops & certificates — 5+ points", seq: 0, status: "pending" },
-    { id: "ms-2", goalId: "goal-stride", title: "Technical", detail: "Hackathons & tech events — 20+ points", seq: 1, status: "in_progress" },
-    { id: "ms-3", goalId: "goal-stride", title: "Extracurricular", detail: "Volunteering & outreach — 15+ points", seq: 2, status: "pending" },
-    { id: "ms-4", goalId: "goal-intern", title: "Resume", detail: "Tailored for React roles", seq: 0, status: "done" },
-    { id: "ms-5", goalId: "goal-intern", title: "Find opportunities", detail: "10 target companies", seq: 1, status: "in_progress" },
-    { id: "ms-6", goalId: "goal-intern", title: "Apply", detail: "10 applications out", seq: 2, status: "in_progress" },
-    { id: "ms-7", goalId: "goal-intern", title: "Interview prep", detail: "DS + system design basics", seq: 3, status: "pending" },
-    { id: "ms-8", goalId: "goal-intern", title: "Follow-ups", detail: "1-week cadence", seq: 4, status: "pending" },
-  ]);
+  /* ── goals (clean slate on reset so user can trigger goal creation via chat) ── */
+  // Left empty so "I have 100 Stride points... Read this document and help me finish it" creates the goal from scratch
 
   /* ── tasks ── */
   const tasks = [
     { id: "task-1", title: "Data Structures Assignment 4", description: "Problem set on AVL trees & hashing", goalId: null, priority: "urgent", deadline: at(1, 23, 59), status: "in_progress", source: "Classroom", createdBy: "agent", points: null },
     { id: "task-2", title: "Fill Teacher Feedback Form", description: "Source: Gmail → Kalaivana — “All students must complete the Teacher Feedback Form by Friday.”", goalId: null, priority: "high", deadline: nextFriday(), status: "planned", source: "Gmail → Kalaivana", createdBy: "agent", points: null },
     { id: "task-3", title: "Register for TCS NQT placement", description: "Placement cell circular — registration closes Friday", goalId: null, priority: "high", deadline: nextFriday(), status: "inbox", source: "Gmail → Placement Cell", createdBy: "agent", points: null },
-    { id: "task-4", title: "Update resume for React roles", description: "Milestone: Resume", goalId: "goal-intern", priority: "high", deadline: at(1, 18), status: "completed", source: "Agent", createdBy: "agent", points: null },
-    { id: "task-5", title: "Apply to 3 positions", description: "Milestone: Apply — 10 target applications", goalId: "goal-intern", priority: "high", deadline: at(5, 10), status: "waiting", source: "Agent", createdBy: "agent", points: null },
+    { id: "task-4", title: "Update resume for React roles", description: "Milestone: Resume", goalId: null, priority: "high", deadline: at(1, 18), status: "completed", source: "Agent", createdBy: "agent", points: null },
+    { id: "task-5", title: "Apply to 3 positions", description: "Milestone: Apply — 10 target applications", goalId: null, priority: "high", deadline: at(5, 10), status: "waiting", source: "Agent", createdBy: "agent", points: null },
     { id: "task-6", title: "Practice DSA — 2 problems", description: "Daily study block, 5:00–6:00 PM", goalId: null, priority: "medium", deadline: at(0, 18), status: "planned", source: "Agent", createdBy: "agent", points: null },
   ];
   await db.insert(s.tasks).values(tasks);

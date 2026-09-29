@@ -134,6 +134,9 @@ export default async function Home() {
                   </div>
                 );
               })}
+              {goalRows.length === 0 && (
+                <div className="text-[12px] text-faint">No active goals yet. Ask Orbit to set up your Stride goal!</div>
+              )}
             </div>
           </Card>
         </div>
