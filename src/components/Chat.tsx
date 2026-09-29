@@ -319,7 +319,7 @@ function BlockView({ b, approvals, onDecide, busy, onSend }: { b: Block; approva
                 rel="noopener noreferrer"
                 className="inline-flex items-center gap-1.5 rounded-lg border border-accent/40 bg-accent px-3 py-1.5 text-[11.5px] font-medium text-white shadow-sm transition hover:brightness-110 glow-accent"
               >
-                <Icon name="mail" size={13} /> Open Compose in Gmail ↗
+                <Icon name="mail" size={13} /> {b.action?.payload?.sent ? "Open in Gmail ↗" : "Open Compose in Gmail ↗"}
               </a>
             </div>
           )}

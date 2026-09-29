@@ -5,8 +5,8 @@ import {
   approvals, automations, calendarEvents, emailItems, goalMilestones, goals, tasks,
 } from "@/db/schema";
 import { createApproval, execTool } from "./executor";
-import { llmReply } from "./ai";
-import { at, fmtDay, fmtTime, nextFriday } from "./tools";
+import { generateNaturalEmail, llmReply } from "./ai";
+import { at, fmtDay, fmtTime, nextFriday, runTool } from "./tools";
 import { logAudit } from "./audit";
 import type { Block, ChatContent } from "./types";
 
@@ -331,7 +331,68 @@ async function hBriefing(_m: string, { runId }: Ctx): Promise<ChatContent> {
 
   return {
     text: `Here's what needs your attention: ${urgent.length} task${urgent.length === 1 ? "" : "s"} due within 48h, ${impUnread.length} important unread email${impUnread.length === 1 ? "" : "s"}, ${pending.length} approval waiting, and your Stride goal is ${pct}% complete.`,
-    blocks: [{ type: "briefing", sections }],
+    blocks: [
+      { type: "briefing", sections },
+      {
+        type: "chips",
+        chips: [
+          { label: "What's my next action?", send: "What's my next action?" },
+          { label: "Check my emails", send: "Check my emails" },
+        ],
+      },
+    ],
+  };
+}
+
+async function hNextAction(_m: string, _ctx: Ctx): Promise<ChatContent> {
+  const activeGoals = await db.select().from(goals).where(eq(goals.status, "active"));
+  const pendingTasks = await db.select().from(tasks).where(eq(tasks.status, "pending")).orderBy(tasks.deadline).limit(6);
+
+  let nextTask = pendingTasks[0];
+  let goalTitle = "";
+
+  if (activeGoals.length > 0) {
+    const primaryGoal = activeGoals[0];
+    goalTitle = primaryGoal.title;
+    if (primaryGoal.nextAction) {
+      const match = pendingTasks.find(
+        (t) => t.title.toLowerCase().includes(primaryGoal.nextAction!.toLowerCase()) || (t.goalId === primaryGoal.id)
+      );
+      if (match) nextTask = match;
+    }
+  }
+
+  if (nextTask) {
+    const dueStr = nextTask.deadline ? `due ${fmtDay(nextTask.deadline)} at ${fmtTime(nextTask.deadline)}` : "no set deadline";
+    return {
+      text: `Your immediate next action is:\n\n🎯 **${nextTask.title}**${goalTitle ? ` (part of **${goalTitle}**)` : ""}\n⏱️ **Deadline:** ${dueStr}\n⚡ **Priority:** ${(nextTask.priority || "routine").toUpperCase()}\n\nWould you like me to find free time on your calendar to complete this, or mark it in progress?`,
+      blocks: [
+        {
+          type: "tasks",
+          items: taskBlock([nextTask]),
+        },
+        {
+          type: "chips",
+          chips: [
+            { label: "Find time in calendar", send: `Find me time in my calendar to complete ${nextTask.title}` },
+            { label: "What's important today?", send: "What's important today?" },
+          ],
+        },
+      ],
+    };
+  }
+
+  return {
+    text: "All clear! You don't have any pending tasks right now. Would you like to review what's important today or set a new goal?",
+    blocks: [
+      {
+        type: "chips",
+        chips: [
+          { label: "What's important today?", send: "What's important today?" },
+          { label: "Find React internships", send: "Find React internships in Coimbatore" },
+        ],
+      },
+    ],
   };
 }
 
@@ -437,7 +498,13 @@ async function hGoal(m: string, { runId }: Ctx): Promise<ChatContent> {
         },
       },
       { type: "tasks", items: taskBlock(created) },
-      { type: "chips", chips: [{ label: "What's my next action?", send: "What's important today?" }] },
+      {
+        type: "chips",
+        chips: [
+          { label: "What's my next action?", send: "What's my next action?" },
+          { label: "What's important today?", send: "What's important today?" },
+        ],
+      },
     ],
   };
 }
@@ -518,16 +585,46 @@ async function hCreateFolder(m: string, { runId }: Ctx): Promise<ChatContent> {
 
 async function hWriteEmail(m: string, { runId }: Ctx): Promise<ChatContent> {
   const emailMatch = m.match(/[\w.-]+@[\w.-]+\.\w+/);
-  const to = emailMatch ? emailMatch[0] : "professor@example.edu";
+  const to = emailMatch ? emailMatch[0] : "recipient@example.com";
 
-  const subMatch = m.match(/(?:about|with subject|subject:)\s+["']?([^"'\n]+?)["']?(?:\s+(?:saying|body:|message:|$))/i);
-  const subject = subMatch ? subMatch[1].trim() : "Follow-up from Aarav";
+  // Natural Language Processing: understand intent and generate natural, human-written email
+  const { subject, body } = await generateNaturalEmail(m, to);
 
-  let body = `Hi,\n\nI am writing to follow up regarding our discussion. Please let me know if any further details are required.\n\nBest regards,\nAarav`;
-  if (/leave|sick|absence/i.test(m)) {
-    body = `Dear Professor,\n\nI am writing to inform you that I will be unable to attend class due to illness. I will ensure all coursework and assignments are reviewed promptly.\n\nThank you for your understanding.\n\nSincerely,\nAarav (COET Coimbatore)`;
-  } else if (/assignment|project|deadline/i.test(m)) {
-    body = `Dear Professor,\n\nI have completed the assignment and attached the project details for your review. Please let me know if any revisions are needed.\n\nRegards,\nAarav`;
+  const isDirectSend = /\b(?:send|deliver|shoot|dispatch)\b.*?\b(?:email|mail)\b|\b(?:email|mail)\s+(?:to\s+)?[\w.-]+@/i.test(m) ||
+    /needs?\s+to\s+be\s+sent|send\s+it\s+(?:automatically|directly|now)/i.test(m) ||
+    /^(?:please\s+)?(?:send|deliver|dispatch)\b/i.test(m);
+
+  const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(to)}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+
+  if (isDirectSend) {
+    await runTool("gmail.send", { to, subject, body }, { runId });
+    await logAudit({
+      action: `gmail.send — ${to}: "${subject}"`,
+      toolId: "gmail.send",
+      runId,
+      authorization: "allowed",
+      resultSummary: `Email dispatched to ${to}`,
+    });
+
+    return {
+      text: `I've sent your email to **${to}** with subject **"${subject}"**:\n\n> **${subject}**\n>\n> ${body.split("\n").join("\n> ")}\n\nDispatched automatically. Click below to review in Gmail:`,
+      blocks: [
+        {
+          type: "result",
+          title: `✉️ Sent Email: ${subject}`,
+          lines: [
+            `To: ${to}`,
+            `Subject: ${subject}`,
+            `Status: Dispatched & Sent automatically ✓`,
+            `Message:\n${body}`,
+          ],
+          action: {
+            type: "mail",
+            payload: { to, subject, body, gmailUrl, sent: true },
+          },
+        },
+      ],
+    };
   }
 
   await execTool(
@@ -536,10 +633,8 @@ async function hWriteEmail(m: string, { runId }: Ctx): Promise<ChatContent> {
     { runId, reason: `Prepare email draft to ${to}` }
   );
 
-  const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(to)}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-
   return {
-    text: `I've prepared your email draft to **${to}** with subject **"${subject}"**. Click below to review and send in Gmail:`,
+    text: `I've prepared your email to **${to}** with subject **"${subject}"**:\n\n> **${subject}**\n>\n> ${body.split("\n").join("\n> ")}\n\nClick below to open and review in Gmail:`,
     blocks: [
       {
         type: "result",
@@ -551,7 +646,7 @@ async function hWriteEmail(m: string, { runId }: Ctx): Promise<ChatContent> {
         ],
         action: {
           type: "mail",
-          payload: { to, subject, body, gmailUrl },
+          payload: { to, subject, body, gmailUrl, sent: false },
         },
       },
     ],
@@ -1120,6 +1215,7 @@ const ROUTES: { re: RegExp; run: (m: string, ctx: Ctx) => Promise<ChatContent> }
   { re: /(cancel|drop|remove|don'?t (want to )?go|not going).{0,45}(event|appointment|meeting|that|it)|cancel that/i, run: hCancelEvent },
   { re: /find (me )?(free )?time|schedule (it|a (study )?block|time|the task)|free time in my calendar/i, run: hScheduleTask },
   { re: /(event|meeting|appointment).{0,45}(tomorrow|today|tonight)|add (it\b|the event|an? (event|meeting))/i, run: hCalendarEvent },
+  { re: /(?:what'?s (?:my )?next(?: action)?|next action|what should i do next|what do i do next)\b/i, run: hNextAction },
   { re: /(important (today|now|emails)|what'?s important|catch me up|briefing|take care of|what should i (do|take)|what'?s (up|on) (today|now)|priorit)/i, run: hBriefing },
   { re: /^(yes|yeah|yep|sure|go ahead|do it|ok|okay|please do)\b/i, run: hAffirm },
   { re: /(?:set|add|schedule|update)?\s*(?:reminder|deadline|time)\s*(?:for|to|on)\b|(?:remind\s+me\s+(?:at|today|tomorrow|in)|keep\s+.{1,30}in\s+inbox)/i, run: hSetTaskReminder },
@@ -1127,7 +1223,7 @@ const ROUTES: { re: RegExp; run: (m: string, ctx: Ctx) => Promise<ChatContent> }
   { re: /(junk|free up|clean( up)?|storage|disk space)/i, run: hCleanup },
   { re: /₹|payment|transfer|send .*rs\b|\bupi\b/i, run: hPayment },
   { re: /(?:create|make|new|add)\s+(?:a\s+)?folder\b|mkdir\b/i, run: hCreateFolder },
-  { re: /(?:write|send|draft|compose)\s+(?:an?\s+)?(?:email|mail|message)\b/i, run: hWriteEmail },
+  { re: /(?:write|send|draft|compose|shoot|dispatch)\s+(?:an?\s+)?(?:email|mail|message)\b|\b(?:email|mail)\s+(?:to\s+)?[\w.-]+@/i, run: hWriteEmail },
   { re: /(important|unread).{0,22}emails?|check (my )?(inbox|email|mails)|triage|email (summary|brief)|college (emails?|mails?)/i, run: hEmailTriage },
   { re: /(?:weather|weaher|wether|temp(?:erature)?|climate|forecast|rain\b|how\s+hot|how\s+cold)/i, run: hWeather },
   { re: /(?:joke|make me laugh|funny|humor|pun\b)/i, run: hJoke },
