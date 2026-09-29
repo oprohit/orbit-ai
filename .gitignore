@@ -17,3 +17,6 @@ netlify_site
 apis.md
 apis.local.md
 .vercel
+
+.vercel
+.env*
