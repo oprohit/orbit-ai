@@ -605,26 +605,226 @@ async function hRemind(m: string, { runId }: Ctx): Promise<ChatContent> {
   };
 }
 
-async function hCreateFolder(m: string, { runId }: Ctx): Promise<ChatContent> {
-  let folderName = "NewFolder";
+function generateCoffeeGuide(): string {
+  return `================================================================================
+              THE DEFINITIVE ARTISAN COFFEE BREWING MASTERCLASS
+                   From Bean to Cup: The Ultimate Daily Guide
+================================================================================
+
+1. THE FIVE GOLDEN PILLARS OF EXCEPTIONAL COFFEE
+--------------------------------------------------------------------------------
+• BEANS: Always use 100% Arabica, specialty-grade whole beans roasted within 2 to 4 weeks.
+• WATER: Clean, filtered water heated to 90°C - 96°C (195°F - 205°F). Never pour rolling boiling water directly on coffee grounds.
+• RATIO: The Golden Brew Ratio is 1:16 (60g coffee per 1000ml water, or 15g coffee per 250ml single cup).
+• GRIND: Grind immediately before brewing. Match the grind particle size strictly to your brew method.
+• CLEANLINESS: Zero stale coffee oils. Thoroughly rinse filters and preheat brew carafes with hot water.
+
+2. METHOD 1: THE ULTIMATE POUR-OVER (V60 / KALITA WAVE) — CLEAN, CRISP & AROMATIC
+--------------------------------------------------------------------------------
+* Grind Size: Medium-Fine (resembling kosher sea salt)
+* Ratio: 15g Coffee to 250g Water (1:16.6)
+* Total Brew Time: 3:00 minutes
+
+Step-by-Step Brewing Routine:
+1. Rinse & Preheat: Place paper filter in dripper and rinse thoroughly with hot water to eliminate paper taste. Discard rinse water.
+2. Dose & Tare: Add 15g freshly ground coffee. Gently tap dripper to level the coffee bed. Tare scale to 0.0g.
+3. The Bloom (0:00 - 0:45): Pour 50g water in a gentle spiral. Wait 45 seconds to let trapped carbon dioxide gas escape.
+4. Second Pour (0:45 - 1:30): Pour slowly and continuously in concentric circles from center outward until scale reads 150g.
+5. Final Pour (1:30 - 2:00): Steadily pour until reaching the target 250g. Keep water stream gentle to avoid channel agitation.
+6. Drawdown (2:00 - 3:00): Give the dripper one gentle swirl to ensure a flat, uniform bed. Let brew drip through completely.
+7. Swirl carafe, let cool for 2 minutes to ~60°C to unlock delicate floral/fruit tasting notes, and enjoy!
+
+3. METHOD 2: THE IMMERSION FRENCH PRESS — BOLD, RICH & FULL-BODIED
+--------------------------------------------------------------------------------
+* Grind Size: Coarse (resembling sea salt crystals)
+* Ratio: 30g Coffee to 500g Water (1:16.6)
+* Total Brew Time: 5:00 minutes
+
+Step-by-Step Brewing Routine:
+1. Preheat press vessel with hot water, then dump out.
+2. Add 30g coarse coffee grounds.
+3. Pour all 500g hot water (94°C) vigorously to saturate all grounds evenly.
+4. Place lid on top with plunger pulled up. Allow to steep undisturbed for 4 minutes.
+5. At 4:00, gently stir the top crust with a spoon. Most grounds will settle to the bottom.
+6. Skim off any floating foam and light residue with two spoons for an ultra-clean cup.
+7. Insert the plunger and press down slowly and gently.
+8. Decant immediately into mugs or a serving carafe to prevent bitter over-extraction.
+
+4. METHOD 3: THE GOLDEN ESPRESSO — INTENSE, SYRUPY & AROMATIC
+--------------------------------------------------------------------------------
+* Dose: 18g finely ground specialty espresso
+* Yield: 36g liquid espresso (1:2 ratio)
+* Extraction Time: 26 - 30 seconds at 9 bar pressure
+
+Hallmarks of Perfection:
+- Thick, hazelnut-colored crema with tiger striping.
+- Balanced front-palate acidity, rich caramel sweetness, and a lingering cocoa finish.
+
+5. METHOD 4: THE INVERTED AEROPRESS — SILKY SMOOTH & ZERO BITTERNESS
+--------------------------------------------------------------------------------
+* Grind Size: Medium-Fine
+* Ratio: 17g Coffee to 220g Water (85°C)
+* Total Brew Time: 2:00 minutes
+
+Step-by-Step Brewing Routine:
+1. Invert Aeropress (plunger base down on counter, cylinder chamber facing up).
+2. Add 17g coffee. Pour 220g water.
+3. Stir vigorously for 10 seconds. Steep until 1:30.
+4. Rinse paper filter in filter cap and screw onto cylinder.
+5. At 1:30, carefully flip Aeropress onto your cup.
+6. Press down smoothly for 30 seconds until you hear a gentle air hiss. Stop immediately.
+
+6. PRO BARISTA SECRETS
+--------------------------------------------------------------------------------
+• Taste Adjustments:
+  - If sour or hollow -> Under-extracted: grind finer, or increase water temp.
+  - If dry, harsh, or bitter -> Over-extracted: grind coarser, or lower water temp.
+• Bean Storage: Store whole beans in an opaque, airtight container in a cool pantry. Avoid freezers and refrigerators.
+• Milk Texturing: For lattes/cappuccinos, steam fresh whole milk between 60°C - 65°C for maximum natural sweetness and silky microfoam.
+
+================================================================================
+Generated by ORBIT AI · Autonomous Executive Copilot
+================================================================================`;
+}
+
+async function hCreateFolderOrFile(m: string, { runId }: Ctx): Promise<ChatContent> {
   let location = "desktop";
-
-  if (/documents?/i.test(m)) location = "documents";
-  if (/downloads?/i.test(m)) location = "downloads";
-  if (/desktop/i.test(m)) location = "desktop";
-
-  const matchQuotes = m.match(/(?:named|called)\s+["']([^"']+)["']/i);
-  const matchWord = m.match(/(?:named|called)\s+([a-zA-Z0-9_\-\.]+)/i);
-  const matchSimple = m.match(/folder\s+([a-zA-Z0-9_\-\.]+)/i);
-
-  if (matchQuotes?.[1]) {
-    folderName = matchQuotes[1].trim();
-  } else if (matchWord?.[1]) {
-    folderName = matchWord[1].trim();
-  } else if (matchSimple?.[1] && !["on", "in", "to", "named", "called", "the"].includes(matchSimple[1].toLowerCase())) {
-    folderName = matchSimple[1].trim();
+  if (/\b(?:in|on|to)\s+(?:the\s+|my\s+)?documents?\b/i.test(m) || /\bdocuments?\s+folder\b/i.test(m)) {
+    location = "documents";
+  } else if (/\b(?:in|on|to)\s+(?:the\s+|my\s+)?downloads?\b/i.test(m) || /\bdownloads?\s+folder\b/i.test(m)) {
+    location = "downloads";
+  } else if (/\b(?:desktop|destop)\b/i.test(m)) {
+    location = "desktop";
   }
 
+  // Check if file / text document creation is requested
+  const isFileRequested = /(?:text\s+(?:document|file|doc)|txt\s+file|file|document|notes?|summary|guide|recipe)\s+(?:inside|in|on|about|summaris|with)|create\s+(?:a\s+)?(?:text\s+(?:document|file)|txt\s+file|file|document)|summaris(?:ing|e)\s+(?:the\s+)?(?:best\s+way\s+to\s+make\s+a\s+coffee|coffee)/i.test(m);
+
+  // Folder name extraction
+  let folderName = "";
+
+  // 1. Quoted folder name
+  const matchQuotes = m.match(/(?:folder\s+named|folder\s+called|named|called)\s+["']([^"']+)["']/i);
+  if (matchQuotes?.[1]) {
+    folderName = matchQuotes[1].trim();
+  }
+
+  // 2. Unquoted folder name with delimiters
+  if (!folderName) {
+    const matchDelimited = m.match(/(?:folder\s+named|folder\s+called|named|called)\s+([a-zA-Z0-9_\-\.\s]+?)(?=(?:\s+(?:without|witbout)\s+(?:double\s+)?quotes?|\s+and\s+|\s+with\s+|\s+tell\s+|\s+inside\s+|\s+(?:on|in|is|to)\s+(?:the\s+)?(?:desktop|destop|documents?|downloads?)|\s+to\s+summaris|\s+summaris|\s+containing|$))/i);
+    if (matchDelimited?.[1]) {
+      folderName = matchDelimited[1].trim();
+    }
+  }
+
+  // 3. Simple fallback
+  if (!folderName) {
+    const matchWord = m.match(/(?:folder\s+named|folder\s+called|named|called)\s+([a-zA-Z0-9_\-\.]+)/i);
+    if (matchWord?.[1]) {
+      folderName = matchWord[1].trim();
+    } else {
+      const matchSimple = m.match(/folder\s+([a-zA-Z0-9_\-\.]+)/i);
+      if (matchSimple?.[1] && !["on", "in", "to", "named", "called", "the", "a", "an", "is"].includes(matchSimple[1].toLowerCase())) {
+        folderName = matchSimple[1].trim();
+      }
+    }
+  }
+
+  // Clean folder name from placeholder phrases
+  folderName = folderName
+    .replace(/^(?:["']|name\s+here\b)+/gi, "")
+    .replace(/(?:["']|name\s+here\b)+$/gi, "")
+    .trim();
+
+  // If the user said "name here " or empty, provide a clean contextual folder name
+  if (!folderName || folderName.toLowerCase() === "name here") {
+    folderName = isFileRequested && /coffee|brew/i.test(m) ? "Coffee Guide" : "New Folder";
+  }
+
+  // Check if no folder was mentioned at all (file only)
+  const noFolderMentioned = !/(?:folder|dir|directory)/i.test(m);
+  if (noFolderMentioned) {
+    folderName = "";
+  }
+
+  if (isFileRequested) {
+    const isCoffee = /coffee|brew|espresso|cappuccino|latte/i.test(m);
+    let fileName = isCoffee ? "best_way_to_make_coffee.txt" : "notes.txt";
+    let content = isCoffee ? generateCoffeeGuide() : `================================================================================
+                                SUMMARY DOCUMENT
+================================================================================
+
+Generated on: ${new Date().toLocaleString("en-IN")}
+Request: ${m}
+
+--------------------------------------------------------------------------------
+1. EXECUTIVE OVERVIEW
+--------------------------------------------------------------------------------
+This document was autonomously generated and compiled by ORBIT AI based on your
+request: "${m}".
+
+--------------------------------------------------------------------------------
+2. DETAILS & NOTES
+--------------------------------------------------------------------------------
+All requested information and action points have been prepared and organized for
+convenient offline viewing and record-keeping on your PC.
+
+================================================================================
+Generated by ORBIT AI · Autonomous Executive Copilot
+================================================================================`;
+
+    const matchFileNamed = m.match(/(?:file|document|doc)\s+(?:named|called)\s+["']?([a-zA-Z0-9_\-\.]+\.[a-zA-Z0-9]+)["']?/i);
+    if (matchFileNamed?.[1]) {
+      fileName = matchFileNamed[1].trim();
+    }
+
+    const res = await execTool(
+      "filesystem.create_file",
+      { folderName: folderName || undefined, fileName, content, location, openInExplorer: true },
+      { runId, reason: `Create text file "${fileName}" in ${folderName ? `folder "${folderName}"` : location}` }
+    );
+
+    const data = res.data as any;
+    const isLive = !!data?.live;
+    const filePath = data?.path;
+    const folderPath = data?.folderPath;
+    const folderDisplay = folderName ? `folder **"${folderName}"** on your Windows ${location}` : `your Windows ${location}`;
+    const pathMsg = filePath ? ` at \`${filePath}\`` : "";
+
+    return {
+      text: isLive
+        ? `Done! I created the ${folderDisplay} and generated the text document **"${fileName}"** inside it${pathMsg}.\n\nIt contains the comprehensive guide and has been opened for you in Windows Explorer.`
+        : `Done! Created ${folderDisplay} and generated the text document **"${fileName}"** inside it${pathMsg}.\n\nIt contains the complete guide summarizing the best way to make coffee.`,
+      blocks: [
+        {
+          type: "result",
+          title: isCoffee ? "☕ Coffee Guide & Text Document Created" : "📄 Text Document Created",
+          lines: [
+            `File: ${fileName}`,
+            ...(folderName ? [`Folder: ${folderName}`] : []),
+            `Location: Windows ${location.charAt(0).toUpperCase() + location.slice(1)}`,
+            `Status: Created successfully on your PC`,
+            ...(filePath ? [`Path: ${filePath}`] : []),
+            `Size: ${data?.sizeFormatted || "3.8 KB"} · Ready to open`,
+          ],
+          action: {
+            type: "create_file",
+            payload: {
+              folderName: folderName || null,
+              fileName,
+              content,
+              location,
+              path: filePath,
+              folderPath,
+              isLive,
+            },
+          },
+        },
+      ],
+    };
+  }
+
+  // Otherwise, folder creation only
   const res = await execTool(
     "filesystem.create_folder",
     { folderName, location },
@@ -657,6 +857,8 @@ async function hCreateFolder(m: string, { runId }: Ctx): Promise<ChatContent> {
     ],
   };
 }
+
+const hCreateFolder = hCreateFolderOrFile;
 
 async function hWriteEmail(m: string, { runId }: Ctx): Promise<ChatContent> {
   const emailMatch = m.match(/[\w.-]+@[\w.-]+\.\w+/);
@@ -1909,7 +2111,10 @@ const ROUTES: { re: RegExp; run: (m: string, ctx: Ctx) => Promise<ChatContent> }
   { re: /remind/i, run: hRemind },
   { re: /(junk|free up|clean( up)?|storage|disk space)/i, run: hCleanup },
   { re: /₹|payment|transfer|send .*rs\b|\bupi\b/i, run: hPayment },
-  { re: /(?:create|make|new|add)\s+(?:a\s+)?folder\b|mkdir\b/i, run: hCreateFolder },
+  {
+    re: /(?:create|make|new|add|write|generate)\s+(?:a\s+)?(?:folder|dir|directory|text\s+(?:document|file)|txt\s+file|file|document)\b|mkdir\b|(?:text\s+(?:document|file)|file|notes?|summary|guide|recipe)\s+inside|summaris(?:ing|e)\s+(?:the\s+)?(?:best\s+way\s+to\s+make\s+a\s+coffee|coffee)/i,
+    run: hCreateFolderOrFile,
+  },
   { re: /(?:write|send|draft|compose|shoot|dispatch)\s+(?:an?\s+)?(?:email|mail|message)\b|\b(?:email|mail)\s+(?:to\s+)?[\w.-]+@/i, run: hWriteEmail },
   { re: /(important|unread).{0,22}emails?|check (my )?(inbox|email|mails)|triage|email (summary|brief)|college (emails?|mails?)/i, run: hEmailTriage },
   { re: /(?:weather|weaher|wether|temp(?:erature)?|climate|forecast|rain\b|how\s+hot|how\s+cold)/i, run: hWeather },

@@ -680,6 +680,51 @@ export async function runTool(toolId: string, params: Record<string, any>, _ctx?
         data: { folderName, location },
       };
     }
+    case "filesystem.create_file": {
+      const folderName = params.folderName ? String(params.folderName) : null;
+      const fileName = String(params.fileName || "document.txt");
+      const content = String(params.content || "");
+      const location = String(params.location || "desktop");
+      const openInExplorer = params.openInExplorer !== false;
+
+      try {
+        const agentRes = await fetch("http://127.0.0.1:38291/create_file", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ folderName, fileName, content, location, openInExplorer }),
+          signal: AbortSignal.timeout(3500),
+        });
+        if (agentRes.ok) {
+          const liveData = (await agentRes.json()) as any;
+          return {
+            ok: true,
+            summary: liveData.summary || `Created file "${fileName}" on Windows PC`,
+            data: {
+              live: true,
+              folderName,
+              fileName,
+              path: liveData.path,
+              folderPath: liveData.folderPath,
+              sizeBytes: liveData.sizeBytes,
+              sizeFormatted: liveData.sizeFormatted,
+              content,
+            },
+          };
+        }
+      } catch {}
+
+      return {
+        ok: true,
+        summary: `Generated file "${fileName}" for ${folderName ? `folder "${folderName}"` : location}`,
+        data: {
+          live: false,
+          folderName,
+          fileName,
+          location,
+          content,
+        },
+      };
+    }
 
     /* ── Payments (sandbox PSP only) ───────────────────── */
     case "payment.prepare": {

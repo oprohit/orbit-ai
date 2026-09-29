@@ -329,6 +329,58 @@ function BlockView({
               </button>
             </div>
           )}
+          {b.action?.type === "create_file" && (
+            <div className="mt-3 space-y-2 border-t border-line/60 pt-2.5">
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      await fetch("http://127.0.0.1:38291/open", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ path: b.action?.payload?.path || b.action?.payload?.folderPath }),
+                      });
+                    } catch {
+                      alert("Desktop Agent not reachable at 127.0.0.1:38291. You can still download the file using the button below!");
+                    }
+                  }}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-accent/40 bg-accent-soft px-3 py-1.5 text-[11.5px] font-medium text-accent transition hover:brightness-110"
+                >
+                  <Icon name="external" size={12} /> Open in Windows Explorer
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const content = b.action?.payload?.content || "";
+                    const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement("a");
+                    a.href = url;
+                    a.download = b.action?.payload?.fileName || "best_way_to_make_coffee.txt";
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                  }}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-1.5 text-[11.5px] font-medium text-emerald-400 transition hover:bg-emerald-500/20"
+                >
+                  <Icon name="download" size={12} /> Download .txt File
+                </button>
+              </div>
+              {b.action?.payload?.content && (
+                <details className="group mt-2 rounded-lg border border-line/60 bg-surface/40 p-2.5 text-[11px] text-muted">
+                  <summary className="cursor-pointer select-none font-medium text-ink transition hover:text-accent flex items-center justify-between">
+                    <span>📄 View Document Content Preview</span>
+                    <span className="text-[10px] text-faint group-open:rotate-180 transition-transform">▼</span>
+                  </summary>
+                  <pre className="mt-2.5 max-h-60 overflow-y-auto whitespace-pre-wrap rounded-md bg-black/50 p-3 font-mono text-[11px] leading-relaxed text-ink/90 border border-line/40">
+                    {b.action.payload.content}
+                  </pre>
+                </details>
+              )}
+            </div>
+          )}
           {b.action?.type === "mail" && (
             <div className="mt-3 flex items-center gap-2 border-t border-line/60 pt-2.5">
               <a
@@ -765,6 +817,18 @@ export default function Chat({ initialMessages }: { initialMessages: Msg[] }) {
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                   folderName: blk.action.payload.folderName,
+                  location: blk.action.payload.location,
+                  openInExplorer: true,
+                }),
+              }).catch(() => {});
+            } else if (blk.action.type === "create_file") {
+              fetch("http://127.0.0.1:38291/create_file", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  folderName: blk.action.payload.folderName,
+                  fileName: blk.action.payload.fileName,
+                  content: blk.action.payload.content,
                   location: blk.action.payload.location,
                   openInExplorer: true,
                 }),

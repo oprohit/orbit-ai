@@ -248,9 +248,71 @@ function startDesktopAgent() {
           res.end(
             JSON.stringify({
               ok: true,
+              live: true,
               folderName,
               path: finalPath,
               summary: `Created folder "${folderName}" at ${finalPath}`,
+            })
+          );
+        } catch (e) {
+          res.writeHead(500, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: e.message }));
+        }
+      });
+      return;
+    }
+
+    if ((url.pathname === "/create_file" || url.pathname === "/write_file") && req.method === "POST") {
+      let body = "";
+      req.on("data", (chunk) => (body += chunk));
+      req.on("end", async () => {
+        try {
+          const parsed = body ? JSON.parse(body) : {};
+          const home = os.homedir();
+          const location = (parsed.location || "desktop").toLowerCase();
+          let baseDir = path.join(home, "Desktop");
+          if (location === "documents") baseDir = path.join(home, "Documents");
+          if (location === "downloads") baseDir = path.join(home, "Downloads");
+          if (parsed.customPath) baseDir = parsed.customPath;
+
+          let targetDir = baseDir;
+          if (parsed.folderName) {
+            const cleanFolder = String(parsed.folderName).replace(/[<>:"/\\|?*]/g, "_").trim();
+            if (cleanFolder) {
+              targetDir = path.join(baseDir, cleanFolder);
+              await fs.promises.mkdir(targetDir, { recursive: true });
+            }
+          }
+
+          const rawFileName = parsed.fileName || "document.txt";
+          let cleanFileName = String(rawFileName).replace(/[<>:"/\\|?*]/g, "_").trim();
+          if (!cleanFileName.includes(".")) {
+            cleanFileName += ".txt";
+          }
+
+          const fullFilePath = path.join(targetDir, cleanFileName);
+          const content = typeof parsed.content === "string" ? parsed.content : String(parsed.content || "");
+
+          await fs.promises.writeFile(fullFilePath, content, "utf-8");
+
+          if (parsed.openInExplorer !== false) {
+            exec(`explorer /select,"${fullFilePath}"`);
+          }
+
+          const stats = await fs.promises.stat(fullFilePath);
+
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(
+            JSON.stringify({
+              ok: true,
+              live: true,
+              fileName: cleanFileName,
+              folderName: parsed.folderName || null,
+              path: fullFilePath,
+              folderPath: targetDir,
+              sizeBytes: stats.size,
+              sizeFormatted: formatBytes(stats.size),
+              summary: `Created file "${cleanFileName}" at ${fullFilePath}`,
             })
           );
         } catch (e) {
@@ -406,7 +468,15 @@ function startDesktopAgent() {
         try {
           const parsed = JSON.parse(body);
           const targetPath = parsed.path || os.homedir();
-          exec(`explorer "${targetPath}"`);
+          try {
+            if (fs.existsSync(targetPath) && fs.statSync(targetPath).isFile()) {
+              exec(`explorer /select,"${targetPath}"`);
+            } else {
+              exec(`explorer "${targetPath}"`);
+            }
+          } catch {
+            exec(`explorer "${targetPath}"`);
+          }
           res.writeHead(200, { "Content-Type": "application/json" });
           res.end(JSON.stringify({ ok: true, opened: targetPath }));
         } catch (e) {

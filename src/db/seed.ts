@@ -102,6 +102,8 @@ export async function seedDemo() {
     ["filesystem.scan", "Files · Scan", "localfiles", "Desktop Agent: scan for junk (read-only)", "low", false],
     ["filesystem.archive", "Files · Archive", "localfiles", "Move files to archive", "high", true],
     ["filesystem.delete", "Files · Delete", "localfiles", "Delete files (destructive)", "critical", true],
+    ["filesystem.create_folder", "Files · Create Folder", "localfiles", "Desktop Agent: create folder on Windows Desktop", "low", false],
+    ["filesystem.create_file", "Files · Create File", "localfiles", "Desktop Agent: create and write text documents/files on Windows", "low", false],
     ["payment.prepare", "Payments · Prepare", "payments", "Prepare a sandbox transaction", "medium", false],
     ["payment.execute", "Payments · Execute", "payments", "Execute a payment (financial)", "critical", true],
     ["skill.toggle", "Skills · Toggle", null, "Enable or disable an agent skill", "medium", true],
@@ -119,6 +121,7 @@ export async function seedDemo() {
     ["gmail.send", "ask"], ["gmail.delete", "block"], ["gmail.draft", "allow"], ["gmail.label", "allow"],
     ["calendar.create", "ask"], ["calendar.update", "ask"], ["calendar.delete", "ask"],
     ["filesystem.delete", "ask"], ["filesystem.archive", "ask"],
+    ["filesystem.create_folder", "allow"], ["filesystem.create_file", "allow"],
     ["payment.execute", "ask"], ["payment.prepare", "allow"],
     ["task.create", "allow"], ["drive.read", "allow"],
   ];
