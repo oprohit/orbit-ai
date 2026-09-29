@@ -14,6 +14,13 @@ export default function ResetDemoButton({
   async function handleReset() {
     try {
       setLoading(true);
+      try {
+        localStorage.removeItem("orbit_task_breaker_completed");
+        localStorage.clear();
+      } catch {}
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("orbit:reset"));
+      }
       const res = await fetch("/api/reset-demo", { method: "POST" });
       if (res.ok) {
         window.location.reload();

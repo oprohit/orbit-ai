@@ -22,6 +22,7 @@ export type Block =
       phases: { name: string; duration: string; focus: string }[];
       subtasks: { id: string; title: string; status: "pending" | "in_progress" | "done"; weight?: string }[];
       resources: { title: string; channel: string; duration: string; why: string; url: string }[];
+      isAdded?: boolean;
     };
 
 export type ChatContent = {

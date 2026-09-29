@@ -1732,11 +1732,64 @@ async function hBreakGoal(m: string, { runId }: Ctx): Promise<ChatContent> {
     ];
   }
 
+  const wantsGoal = /goal|long.?term|active|make\s+this|save|track|prepare/i.test(m);
+  let goalAdded = false;
+  if (wantsGoal) {
+    const existing = await findGoal(isGate ? "GATE" : isDsa ? "DSA" : goalName);
+    if (!existing || existing.status !== "active") {
+      const goalId = randomUUID();
+      const deadline = at(isGate ? 240 : 120, 23, 59);
+      await db.insert(goals).values({
+        id: goalId,
+        title: goalName,
+        description: `Comprehensive structured preparation: ${timeline}`,
+        status: "active",
+        deadline,
+        targetValue: subtasks.length,
+        currentValue: 0,
+        unit: "tasks",
+        aiReasoning: `Activated strategic goal from user request “${m}”. Decomposed into ${phases.length} milestone phases and ${subtasks.length} actionable preparation tasks.`,
+        nextAction: subtasks[0]?.title || "Start Phase 1",
+        sources: ["User Goal"],
+      });
+
+      for (const [i, ph] of phases.entries()) {
+        await db.insert(goalMilestones).values({
+          id: randomUUID(),
+          goalId,
+          title: ph.name,
+          detail: ph.focus,
+          seq: i,
+          status: i === 0 ? "in_progress" : "pending",
+        });
+      }
+
+      for (const st of subtasks) {
+        await db.insert(tasks).values({
+          id: randomUUID(),
+          goalId,
+          title: st.title,
+          priority: "high",
+          status: "inbox",
+          deadline: at(3, 18),
+          source: "Agent",
+        });
+      }
+      goalAdded = true;
+    } else {
+      goalAdded = true;
+    }
+
+    summaryText = `🎯 **I have added "${goalName}" as an Active Goal in your Orbit dashboard!** It is now visible under your **Goals** tab and on your **Home** overview.\n\nDecomposed into ${phases.length} structured milestone phases with ${subtasks.length} actionable subtasks, plus curated YouTube lecture playlists below:`;
+  }
+
   await logAudit({
-    action: `goal.breakdown — "${goalName}"`,
+    action: goalAdded ? `goal.created — "${goalName}"` : `goal.breakdown — "${goalName}"`,
     runId,
     authorization: "allowed",
-    resultSummary: `Generated roadmap and YouTube resources for "${goalName}" without auto-persisting`,
+    resultSummary: goalAdded
+      ? `Active goal created with ${phases.length} milestones and ${subtasks.length} tasks`
+      : `Generated roadmap and YouTube resources for "${goalName}" without auto-persisting`,
   });
 
   return {
@@ -1744,18 +1797,19 @@ async function hBreakGoal(m: string, { runId }: Ctx): Promise<ChatContent> {
     blocks: [
       {
         type: "study_plan",
-        title: `🎯 Research & Preparation Plan: ${goalName}`,
+        title: `🎯 ${goalAdded ? "Active Goal & Preparation Plan" : "Research & Preparation Plan"}: ${goalName}`,
         goal: goalName,
         timeline,
         phases,
         subtasks,
         resources,
+        isAdded: goalAdded,
       },
       {
         type: "chips",
         chips: [
-          { label: `🎯 Add as active goal in Orbit`, send: `create a goal to prepare for ${goalName}` },
-          { label: "Search more YouTube lectures", send: `Search YouTube videos for ${goalName}` },
+          { label: "Open Task Breaker (110 Steps)", send: "Open task breaker flowchart" },
+          { label: "What's my next action?", send: "What's my next action?" },
           { label: "What's important today?", send: "What's important today?" },
         ],
       },
@@ -1838,7 +1892,7 @@ async function hWhatsApp(_m: string, { runId }: Ctx): Promise<ChatContent> {
 const ROUTES: { re: RegExp; run: (m: string, ctx: Ctx) => Promise<ChatContent> }[] = [
   { re: /(?:setup|link|connect|scan|sync|read|qr)\s*(?:my\s*)?whatsapp|whatsapp\b/i, run: hWhatsApp },
   { re: /^(?:please\s+|can\s+you\s+|could\s+you\s+)?(?:open\s+(?:youtube\s*music|yt\s*music|spotify)\s+(?:and\s+)?(?:play|stream|listen\s+to)?\s*["']?([^"'\n]*?)["']?)|^(?:please\s+|can\s+you\s+|could\s+you\s+)?(?:play|listen to|stream|put on)\s+(?:music|song|track)?\s*["']?([^"'\n]+?)["']?$/i, run: hPlayMusic },
-  { re: /(?:turn\s+(?:this\s+into\s+)?(?:an?\s+)?(?:application\s+)?goal|long.?term\s+goal|make\s+it\s+(?:an?\s+)?(?:long.?term\s+)?goal|make\s+this\s+(?:as\s+)?(?:an?\s+)?(?:active\s+|long.?term\s+)?goal|create\s+(?:a\s+|an\s+)?(?:active\s+)?goal|add\s+(?:this\s+)?(?:as\s+)?(?:an?\s+)?(?:active\s+|actiev\s+)?goal|add\s+as\s+active\s+goal|plan\s+(?:for|to)|help me (?:complete|prepare|finish|achieve|get|plan|make).{0,35}goal|set\s+up\s+(?:a\s+)?goal|^create\s+(?:a\s+)?goal)/i, run: hGoal },
+  { re: /(?:goal|goals|long.?term\s+goal|make\s+this\s+(?:as\s+)?(?:an?\s+)?(?:active\s+|long.?term\s+)?goal|create\s+(?:a\s+|an\s+)?(?:active\s+)?goal|add\s+(?:this\s+)?(?:as\s+)?(?:an?\s+)?(?:active\s+|actiev\s+)?goal|add\s+as\s+active\s+goal|help me (?:complete|prepare|finish|achieve|get|plan|make).{0,60}goal|prepare\s+for\s+gate|gate\s+prep)/i, run: hGoal },
   { re: /(?:complex\s+task|task\s+breaker|flowchart|100\s+steps|roadmap\s+for|draw\s+roadmap|break\s+down\s+(?:my\s+|this\s+|a\s+)?(?:complex\s+)?(?:task|goal)|prepare for|i want to prepare|how to (?:prepare|study|learn|master)|breakdown|study plan for|syllabus for|strategy for)\s*([a-zA-Z0-9\s-]*)/i, run: hBreakGoal },
   { re: /(?:automation|automations)\b|(?:change|update|set|reschedule|adjust|switch|turn\s+(?:on|off)|enable|disable|pause)\s+.{0,50}(?:email triage|calendar check|expense report|internship search|approval ping|timing|schedule|cadence)\b|(?:email triage|calendar check|expense report|internship search|approval ping)\s*.{0,50}(?:change|update|set|to\s+\d|at\s+\d|every)\b/i, run: hAutomationManage },
   { re: /register(ation)?|codespark/i, run: hRegister },

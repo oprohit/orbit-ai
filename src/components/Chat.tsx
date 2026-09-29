@@ -417,7 +417,7 @@ function BlockView({
               >
                 <span>🎯</span> Open Task Breaker Flowchart (110 Steps)
               </button>
-              {addedGoals?.[b.goal] ? (
+              {(addedGoals?.[b.goal] || b.isAdded) ? (
                 <button
                   type="button"
                   disabled

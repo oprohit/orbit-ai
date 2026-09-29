@@ -22,13 +22,26 @@ export default function TaskBreakerModal() {
       }
     } catch {}
 
-    const handleOpen = (e: any) => {
+    const handleOpen = () => {
       setIsOpen(true);
       setIsMinimized(false);
     };
 
+    const handleReset = () => {
+      setIsOpen(false);
+      setIsMinimized(false);
+      setCompletedIds({});
+      try {
+        localStorage.removeItem("orbit_task_breaker_completed");
+      } catch {}
+    };
+
     window.addEventListener("orbit:open-task-breaker", handleOpen);
-    return () => window.removeEventListener("orbit:open-task-breaker", handleOpen);
+    window.addEventListener("orbit:reset", handleReset);
+    return () => {
+      window.removeEventListener("orbit:open-task-breaker", handleOpen);
+      window.removeEventListener("orbit:reset", handleReset);
+    };
   }, []);
 
   // Save changes to localStorage
@@ -103,32 +116,9 @@ export default function TaskBreakerModal() {
     ];
   }, []);
 
-  // If closed, show floating studio launcher pill
-  if (!isOpen) {
-    return (
-      <div className="fixed bottom-20 right-6 z-40 md:bottom-6">
-        <button
-          onClick={() => {
-            setIsOpen(true);
-            setIsMinimized(false);
-          }}
-          className="group flex items-center gap-2.5 rounded-full border border-accent/40 bg-surface/95 px-4 py-2.5 shadow-xl backdrop-blur-md transition-all hover:scale-105 hover:border-accent hover:shadow-accent/20"
-        >
-          <span className="grid h-6 w-6 place-items-center rounded-full bg-accent/20 text-accent font-bold text-xs group-hover:bg-accent group-hover:text-black transition-colors">
-            🎯
-          </span>
-          <div className="text-left">
-            <div className="text-[12px] font-semibold text-ink flex items-center gap-1.5">
-              Task Breaker
-              <span className="rounded bg-accent/15 px-1.5 py-0.2 font-mono text-[10px] text-accent">
-                {completedCount}/{totalSteps}
-              </span>
-            </div>
-            <div className="text-[10px] text-faint">110-Step GATE Roadmap</div>
-          </div>
-        </button>
-      </div>
-    );
+  // If closed and not minimized, do not render any floating pill
+  if (!isOpen && !isMinimized) {
+    return null;
   }
 
   // If minimized, show sleek floating dock widget in bottom right
@@ -155,7 +145,10 @@ export default function TaskBreakerModal() {
           </div>
           <div className="flex items-center gap-1 border-l border-line pl-2">
             <button
-              onClick={() => setIsMinimized(false)}
+              onClick={() => {
+                setIsMinimized(false);
+                setIsOpen(true);
+              }}
               className="rounded-lg p-1.5 text-muted hover:bg-white/10 hover:text-ink transition-colors"
               title="Expand Studio"
             >
@@ -164,7 +157,10 @@ export default function TaskBreakerModal() {
               </svg>
             </button>
             <button
-              onClick={() => setIsOpen(false)}
+              onClick={() => {
+                setIsMinimized(false);
+                setIsOpen(false);
+              }}
               className="rounded-lg p-1.5 text-muted hover:bg-white/10 hover:text-danger transition-colors"
               title="Close"
             >
@@ -233,7 +229,10 @@ export default function TaskBreakerModal() {
             {/* Window Controls: Minimize, Maximize, Close */}
             <div className="flex items-center gap-1 border-l border-line pl-2 ml-1">
               <button
-                onClick={() => setIsMinimized(true)}
+                onClick={() => {
+                  setIsMinimized(true);
+                  setIsOpen(false);
+                }}
                 className="rounded-lg p-1.5 text-muted hover:bg-white/10 hover:text-accent transition-colors"
                 title="Minimize (keep chatting while working)"
               >
@@ -251,7 +250,10 @@ export default function TaskBreakerModal() {
                 </svg>
               </button>
               <button
-                onClick={() => setIsOpen(false)}
+                onClick={() => {
+                  setIsOpen(false);
+                  setIsMinimized(false);
+                }}
                 className="rounded-lg p-1.5 text-muted hover:bg-white/10 hover:text-danger transition-colors"
                 title="Close"
               >
