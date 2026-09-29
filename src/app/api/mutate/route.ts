@@ -7,6 +7,7 @@ import {
   notifications, profiles, skills, tasks,
 } from "@/db/schema";
 import { execTool, createApproval } from "@/lib/executor";
+import { runTool } from "@/lib/tools";
 import { resetPolicies, setPolicy } from "@/lib/policy";
 import { logAudit } from "@/lib/audit";
 
@@ -82,7 +83,7 @@ export async function POST(req: NextRequest) {
       }
 
       case "job.apply": {
-        const res = await execTool("job.apply", { role: b.role, company: b.company }, { reason: "User applied via Orbit" });
+        const res = await runTool("job.apply", { role: b.role, company: b.company });
         await logAudit({ action: `job.apply — ${b.role} at ${b.company}`, authorization: "allowed" });
         return NextResponse.json(res);
       }
