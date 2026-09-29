@@ -289,6 +289,88 @@ function ReminderTimerCard({ payload }: { payload: { title: string; targetTime: 
   );
 }
 
+function AutoMusicPlayer({ payload }: { payload: any }) {
+  const launchedRef = useRef(false);
+  const targetUrl = payload?.primaryUrl || payload?.musicUrl || payload?.url;
+
+  const triggerOpen = useCallback((urlToOpen: string) => {
+    if (!urlToOpen) return;
+    // 1. Tell local companion agent to launch browser via Windows OS start command (bypasses browser popup blocks)
+    fetch("http://127.0.0.1:38291/open", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url: urlToOpen }),
+    }).catch(() => {});
+
+    // 2. Also open via window.open (handled by Electron shell.openExternal or browser)
+    try {
+      if (typeof window !== "undefined") {
+        window.open(urlToOpen, "_blank", "noopener,noreferrer");
+      }
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    if (launchedRef.current || !targetUrl) return;
+    launchedRef.current = true;
+    triggerOpen(targetUrl);
+  }, [targetUrl, triggerOpen]);
+
+  return (
+    <div className="mt-3 space-y-2.5 border-t border-line/60 pt-2.5">
+      <div className="flex items-center justify-between rounded-xl border border-line bg-surface/80 px-3.5 py-2.5 text-[12px]">
+        <div className="flex items-center gap-2">
+          <span className="relative flex h-2.5 w-2.5">
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+            <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-500" />
+          </span>
+          <span className="font-medium text-ink">{payload.song}</span>
+          <span className="text-[11px] text-muted">· Direct autoplay in browser tab</span>
+        </div>
+        <span className="rounded bg-emerald-500/15 px-2 py-0.5 text-[10.5px] font-mono text-emerald-400">
+          Auto-opening browser tab ✓
+        </span>
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        {payload?.musicUrl && (
+          <button
+            type="button"
+            onClick={() => triggerOpen(payload.musicUrl)}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-accent/40 bg-accent px-3 py-1.5 text-[11.5px] font-medium text-white shadow-sm transition hover:brightness-110 glow-accent"
+          >
+            <Icon name="orbit" size={13} /> Play on YouTube Music ↗
+          </button>
+        )}
+        {payload?.url && (
+          <button
+            type="button"
+            onClick={() => triggerOpen(payload.url)}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-surface px-2.5 py-1.5 text-[11.5px] font-medium text-muted transition hover:bg-white/5 hover:text-ink"
+          >
+            YouTube ↗
+          </button>
+        )}
+        {payload?.spotifyUrl && (
+          <button
+            type="button"
+            onClick={() => triggerOpen(payload.spotifyUrl)}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-surface px-2.5 py-1.5 text-[11.5px] font-medium text-muted transition hover:bg-white/5 hover:text-ink"
+          >
+            Spotify ↗
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={() => triggerOpen(targetUrl)}
+          className="inline-flex items-center gap-1 rounded-lg border border-line bg-white/5 px-2.5 py-1.5 text-[11px] text-muted hover:text-ink hover:bg-white/10"
+        >
+          Re-open Browser ↗
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function BlockView({
   b,
   approvals,
@@ -571,52 +653,8 @@ function BlockView({
               </a>
             </div>
           )}
-          {b.action?.type === "music" && (
-            <div className="mt-3 space-y-2.5 border-t border-line/60 pt-2.5">
-              <div className="flex items-center justify-between rounded-xl border border-line bg-surface/80 px-3.5 py-2.5 text-[12px]">
-                <div className="flex items-center gap-2">
-                  <span className="relative flex h-2.5 w-2.5">
-                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
-                    <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-500" />
-                  </span>
-                  <span className="font-medium text-ink">{b.action.payload.song}</span>
-                  <span className="text-[11px] text-muted">· Direct autoplay in browser tab</span>
-                </div>
-                <span className="text-[10.5px] font-mono text-faint">No in-app sound</span>
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                {b.action?.payload?.musicUrl && (
-                  <a
-                    href={b.action?.payload?.musicUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1.5 rounded-lg border border-accent/40 bg-accent px-3 py-1.5 text-[11.5px] font-medium text-white shadow-sm transition hover:brightness-110 glow-accent"
-                  >
-                    <Icon name="orbit" size={13} /> Play on YouTube Music ↗
-                  </a>
-                )}
-                {b.action?.payload?.url && (
-                  <a
-                    href={b.action?.payload?.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-surface px-2.5 py-1.5 text-[11.5px] font-medium text-muted transition hover:bg-white/5 hover:text-ink"
-                  >
-                    YouTube ↗
-                  </a>
-                )}
-                {b.action?.payload?.spotifyUrl && (
-                  <a
-                    href={b.action?.payload?.spotifyUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-surface px-2.5 py-1.5 text-[11.5px] font-medium text-muted transition hover:bg-white/5 hover:text-ink"
-                  >
-                    Spotify ↗
-                  </a>
-                )}
-              </div>
-            </div>
+          {b.action?.type === "music" && b.action?.payload && (
+            <AutoMusicPlayer payload={b.action.payload} />
           )}
         </div>
       );

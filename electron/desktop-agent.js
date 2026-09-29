@@ -222,6 +222,40 @@ function startDesktopAgent() {
       return;
     }
 
+    if ((url.pathname === "/open" || url.pathname === "/play") && req.method === "POST") {
+      let body = "";
+      req.on("data", (chunk) => (body += chunk));
+      req.on("end", async () => {
+        try {
+          const parsed = body ? JSON.parse(body) : {};
+          const targetUrl = parsed.url || parsed.musicUrl || parsed.primaryUrl || parsed.ytUrl;
+          const targetPath = parsed.path;
+
+          if (targetUrl) {
+            // Launch in user's default Windows browser via OS start command
+            if (process.platform === "win32") {
+              exec(`start "" "${targetUrl}"`);
+            } else if (process.platform === "darwin") {
+              exec(`open "${targetUrl}"`);
+            } else {
+              exec(`xdg-open "${targetUrl}"`);
+            }
+          } else if (targetPath) {
+            if (process.platform === "win32") {
+              exec(`explorer "${targetPath}"`);
+            }
+          }
+
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ ok: true, opened: true, url: targetUrl, path: targetPath }));
+        } catch (e) {
+          res.writeHead(500, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: e.message }));
+        }
+      });
+      return;
+    }
+
     if (url.pathname === "/mkdir" && req.method === "POST") {
       let body = "";
       req.on("data", (chunk) => (body += chunk));
