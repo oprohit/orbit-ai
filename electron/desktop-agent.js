@@ -308,32 +308,45 @@ function startDesktopAgent() {
       req.on("end", async () => {
         try {
           const parsed = body ? JSON.parse(body) : {};
-          const song = parsed.song || "relaxing music";
-          let targetUrl = parsed.url;
+          const rawSong = parsed.song || "relaxing music";
+          let song = rawSong
+            .replace(/\s+(?:in|on|via|through|using)\s+(?:youtube\s*music|yt\s*music|ytm|youtube|yt|spotify)\b/gi, "")
+            .replace(/\b(?:in|on)\s+(?:youtube\s*music|yt\s*music|ytm)\b/gi, "")
+            .replace(/\s+(?:automatically|auto|in\s+browser|in\s+background|for\s+me)\b/gi, "")
+            .replace(/^["']|["']$/g, "")
+            .trim();
+          if (!song || song.length < 2) song = rawSong || "relaxing music";
 
-          // If no direct watch URL, scrape top YouTube videoId to play automatically
+          let targetUrl = parsed.musicUrl || parsed.url;
+
+          // If no direct watch URL or if YouTube Music was not resolved, use InnerTube API
           if (!targetUrl || !targetUrl.includes("watch?v=")) {
             try {
-              const ytRes = await fetch(
-                `https://www.youtube.com/results?search_query=${encodeURIComponent(song)}`,
-                { headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" } }
-              );
+              const ytRes = await fetch("https://music.youtube.com/youtubei/v1/search", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  context: { client: { clientName: "WEB_REMIX", clientVersion: "1.20231215.01.00" } },
+                  query: song,
+                }),
+                signal: AbortSignal.timeout(4500),
+              });
               if (ytRes.ok) {
-                const html = await ytRes.text();
-                const m = html.match(/videoId.:.([a-zA-Z0-9_-]{11})/);
+                const d = await ytRes.json();
+                const str = JSON.stringify(d);
+                const m = str.match(/"videoId":"([a-zA-Z0-9_-]{11})"/);
                 if (m && m[1]) {
-                  targetUrl = `https://www.youtube.com/watch?v=${m[1]}&autoplay=1`;
+                  targetUrl = `https://music.youtube.com/watch?v=${m[1]}`;
                 }
               }
             } catch (err) {
-              console.warn("YouTube search scrape error:", err.message);
+              console.warn("YouTube Music search error:", err.message);
             }
           }
 
+          // Fallback if still not found
           if (!targetUrl) {
-            targetUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(song)}`;
-          } else if (!targetUrl.includes("autoplay=1") && targetUrl.includes("watch?v=")) {
-            targetUrl += "&autoplay=1";
+            targetUrl = `https://music.youtube.com/search?q=${encodeURIComponent(song)}`;
           }
 
           exec(`start "" "${targetUrl}"`);
@@ -343,7 +356,7 @@ function startDesktopAgent() {
               ok: true,
               song,
               url: targetUrl,
-              summary: `Directly playing "${song}" on default browser`,
+              summary: `Directly playing "${song}" on YouTube Music`,
             })
           );
         } catch (e) {

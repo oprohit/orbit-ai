@@ -1399,42 +1399,83 @@ async function hFallback(m: string, _ctx: Ctx): Promise<ChatContent> {
   return { text, blocks: [] };
 }
 
+function parseMusicQuery(raw: string) {
+  const m = raw.trim();
+  let prefersYtMusic = true;
+  let prefersSpotify = false;
+  let prefersYt = false;
+
+  if (/(?:spotify)/i.test(m)) {
+    prefersSpotify = true;
+    prefersYtMusic = false;
+  } else if (/\b(?:regular youtube|standard youtube|plain youtube)\b/i.test(m)) {
+    prefersYt = true;
+    prefersYtMusic = false;
+  } else {
+    // Default to YouTube Music for dedicated high-fidelity music streaming
+    prefersYtMusic = true;
+  }
+
+  // Strip triggers like "please play", "listen to", "can you play", "play music", "open youtube music and play"
+  let song = m
+    .replace(/^(?:please\s+|can\s+you\s+|could\s+you\s+)?(?:open\s+(?:youtube\s*music|yt\s*music|spotify)\s+(?:and\s+)?(?:play|listen\s+to|stream)?\s*)/i, "")
+    .replace(/^(?:please\s+|can\s+you\s+|could\s+you\s+)?(?:play|listen\s+to|stream|put\s+on|start\s+playing)\s+(?:music|song|track|the\s+song|the\s+track)?\s*["']?/i, "");
+
+  // Strip provider mentions like "in youtube music", "on youtube music", "on spotify"
+  song = song.replace(/\s+(?:in|on|via|through|using)\s+(?:youtube\s*music|yt\s*music|ytm|youtube|yt|spotify)\b/gi, "");
+  song = song.replace(/\b(?:in|on)\s+(?:youtube\s*music|yt\s*music|ytm)\b/gi, "");
+  song = song.replace(/\s+(?:automatically|auto|in\s+browser|in\s+background|for\s+me)\b/gi, "");
+  song = song.replace(/["']?\s*$/i, "").trim();
+
+  if (!song || song.length < 2) song = "relaxing music";
+
+  return { song, prefersYtMusic, prefersSpotify, prefersYt };
+}
+
 async function hPlayMusic(m: string, { runId }: Ctx): Promise<ChatContent> {
-  const song = m.replace(/^(?:please\s+)?(?:play|listen to)\s+(?:music|song|track)?\s*["']?/i, "").replace(/["']?\s*$/i, "").trim() || "relaxing music";
+  const { song, prefersYtMusic, prefersSpotify } = parseMusicQuery(m);
   
-  const execResult = await execTool("media.play", { song }, { runId, reason: `Play music "${song}"` });
+  const execResult = await execTool("media.play", { song, prefersYtMusic }, { runId, reason: `Play music "${song}"` });
   const playData = (execResult.data as any) || {};
 
-  const ytUrl = playData.url || `https://www.youtube.com/results?search_query=${encodeURIComponent(song)}`;
-  const musicUrl = playData.musicUrl || `https://music.youtube.com/search?q=${encodeURIComponent(song)}`;
+  const resolvedVideoId: string | null = playData.videoId || null;
+  const musicUrl = playData.musicUrl || (resolvedVideoId ? `https://music.youtube.com/watch?v=${resolvedVideoId}` : `https://music.youtube.com/search?q=${encodeURIComponent(song)}`);
+  const ytUrl = playData.url || (resolvedVideoId ? `https://www.youtube.com/watch?v=${resolvedVideoId}&autoplay=1` : `https://www.youtube.com/results?search_query=${encodeURIComponent(song)}`);
   const spotifyUrl = playData.spotifyUrl || `https://open.spotify.com/search/${encodeURIComponent(song)}`;
+  const primaryUrl = prefersYtMusic ? musicUrl : (playData.primaryUrl || ytUrl);
+
+  const providerName = prefersYtMusic ? "YouTube Music" : (prefersSpotify ? "Spotify" : "YouTube");
 
   await logAudit({
-    action: `media.play — "${song}"`,
+    action: `media.play — "${song}" on ${providerName}`,
     toolId: "media.play",
     runId,
     authorization: "allowed",
-    resultSummary: `Auto-opened default browser to directly play "${song}"`,
+    resultSummary: `Auto-launched direct music player for "${song}" on ${providerName} (${resolvedVideoId ? `videoId: ${resolvedVideoId}` : "search fallback"})`,
   });
 
   return {
-    text: `🎵 Playing **"${song}"** automatically in your browser! Enjoy the music.`,
+    text: `🎵 Playing **"${song}"** automatically in **${providerName}**! Enjoy the music.`,
     blocks: [
       {
         type: "result",
         title: `🎵 Now Playing: ${song}`,
         lines: [
           `Track: ${song}`,
-          `Status: Direct player launched in browser ✓`,
-          `Provider: YouTube Autoplay & YouTube Music`,
+          `Status: Direct player launched in ${providerName} (Autoplay enabled) ✓`,
+          `Provider: ${providerName}`,
+          resolvedVideoId ? `Track ID: ${resolvedVideoId}` : `Status: Ready`,
         ],
         action: {
           type: "music",
           payload: {
             song,
+            videoId: resolvedVideoId,
+            primaryUrl,
             url: ytUrl,
             musicUrl,
             spotifyUrl,
+            prefersYtMusic,
           },
         },
       },
@@ -1709,7 +1750,7 @@ async function hWhatsApp(_m: string, { runId }: Ctx): Promise<ChatContent> {
 
 const ROUTES: { re: RegExp; run: (m: string, ctx: Ctx) => Promise<ChatContent> }[] = [
   { re: /(?:setup|link|connect|scan|sync|read|qr)\s*(?:my\s*)?whatsapp|whatsapp\b/i, run: hWhatsApp },
-  { re: /^(?:please\s+)?(?:play|listen to)\s+(?:music|song|track)?\s*["']?([^"'\n]+?)["']?$/i, run: hPlayMusic },
+  { re: /^(?:please\s+|can\s+you\s+|could\s+you\s+)?(?:open\s+(?:youtube\s*music|yt\s*music|spotify)\s+(?:and\s+)?(?:play|stream|listen\s+to)?\s*["']?([^"'\n]*?)["']?)|^(?:please\s+|can\s+you\s+|could\s+you\s+)?(?:play|listen to|stream|put on)\s+(?:music|song|track)?\s*["']?([^"'\n]+?)["']?$/i, run: hPlayMusic },
   { re: /(?:complex\s+task|task\s+breaker|flowchart|100\s+steps|roadmap\s+for|draw\s+roadmap|break\s+down\s+(?:my\s+|this\s+|a\s+)?(?:complex\s+)?(?:task|goal)|prepare for|i want to prepare|how to (?:prepare|study|learn|master)|breakdown|study plan for|syllabus for|strategy for)\s*([a-zA-Z0-9\s-]*)/i, run: hBreakGoal },
   { re: /(?:automation|automations)\b|(?:change|update|set|reschedule|adjust|switch|turn\s+(?:on|off)|enable|disable|pause)\s+.{0,50}(?:email triage|calendar check|expense report|internship search|approval ping|timing|schedule|cadence)\b|(?:email triage|calendar check|expense report|internship search|approval ping)\s*.{0,50}(?:change|update|set|to\s+\d|at\s+\d|every)\b/i, run: hAutomationManage },
   { re: /register(ation)?|codespark/i, run: hRegister },

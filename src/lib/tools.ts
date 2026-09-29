@@ -433,43 +433,90 @@ export async function runTool(toolId: string, params: Record<string, any>, _ctx?
     }
 
     case "media.play": {
-      const song = String(params.song || params.query || "music").trim();
+      const rawSong = String(params.song || params.query || "relaxing music").trim();
+      let song = rawSong
+        .replace(/\s+(?:in|on|via|through|using)\s+(?:youtube\s*music|yt\s*music|ytm|youtube|yt|spotify)\b/gi, "")
+        .replace(/\b(?:in|on)\s+(?:youtube\s*music|yt\s*music|ytm)\b/gi, "")
+        .replace(/\s+(?:automatically|in\s+browser|in\s+background|for\s+me)\b/gi, "")
+        .replace(/^["']|["']$/g, "")
+        .trim();
+      if (!song || song.length < 2) song = rawSong || "relaxing music";
+
       let ytUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(song)}`;
       let musicUrl = `https://music.youtube.com/search?q=${encodeURIComponent(song)}`;
       const spotifyUrl = `https://open.spotify.com/search/${encodeURIComponent(song)}`;
+      let resolvedVideoId: string | null = null;
 
       try {
-        const ytRes = await fetch(`https://www.youtube.com/results?search_query=${encodeURIComponent(song)}`, {
-          headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" },
+        const ytRes = await fetch("https://music.youtube.com/youtubei/v1/search", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            context: { client: { clientName: "WEB_REMIX", clientVersion: "1.20231215.01.00" } },
+            query: song,
+          }),
           signal: AbortSignal.timeout(4500),
         });
         if (ytRes.ok) {
-          const html = await ytRes.text();
-          const m = html.match(/videoId.:.([a-zA-Z0-9_-]{11})/) || html.match(/\/watch\?v=([a-zA-Z0-9_-]{11})/);
+          const d = await ytRes.json();
+          const str = JSON.stringify(d);
+          const m = str.match(/"videoId":"([a-zA-Z0-9_-]{11})"/);
           if (m && m[1]) {
-            ytUrl = `https://www.youtube.com/watch?v=${m[1]}&autoplay=1`;
+            resolvedVideoId = m[1];
             musicUrl = `https://music.youtube.com/watch?v=${m[1]}`;
+            ytUrl = `https://www.youtube.com/watch?v=${m[1]}&autoplay=1`;
           }
         }
       } catch {}
+
+      // Secondary fallback if InnerTube was unreachable
+      if (!resolvedVideoId) {
+        try {
+          const searchRes = await fetch(`https://www.youtube.com/results?search_query=${encodeURIComponent(song)}`, {
+            headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" },
+            signal: AbortSignal.timeout(3000),
+          });
+          if (searchRes.ok) {
+            const html = await searchRes.text();
+            const m = html.match(/videoId.:.([a-zA-Z0-9_-]{11})/) || html.match(/\/watch\?v=([a-zA-Z0-9_-]{11})/);
+            if (m && m[1]) {
+              resolvedVideoId = m[1];
+              musicUrl = `https://music.youtube.com/watch?v=${m[1]}`;
+              ytUrl = `https://www.youtube.com/watch?v=${m[1]}&autoplay=1`;
+            }
+          }
+        } catch {}
+      }
+
+      const primaryUrl = params.prefersYtMusic !== false ? musicUrl : (resolvedVideoId ? ytUrl : musicUrl);
 
       try {
         await fetch("http://127.0.0.1:38291/play", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ song, url: ytUrl }),
+          body: JSON.stringify({
+            song,
+            url: primaryUrl,
+            musicUrl,
+            ytUrl,
+            videoId: resolvedVideoId,
+            prefersYtMusic: params.prefersYtMusic !== false,
+          }),
           signal: AbortSignal.timeout(1800),
         });
       } catch {}
 
       return {
         ok: true,
-        summary: `Playing “${song}” automatically on browser`,
+        summary: `Playing “${song}” automatically on YouTube Music`,
         data: {
           song,
+          primaryUrl,
           url: ytUrl,
           musicUrl,
           spotifyUrl,
+          videoId: resolvedVideoId,
+          prefersYtMusic: params.prefersYtMusic !== false,
           autoOpened: true,
         },
       };

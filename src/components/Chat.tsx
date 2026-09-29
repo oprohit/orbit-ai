@@ -324,35 +324,57 @@ function BlockView({ b, approvals, onDecide, busy, onSend }: { b: Block; approva
             </div>
           )}
           {b.action?.type === "music" && (
-            <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-line/60 pt-2.5">
-              <a
-                href={b.action?.payload?.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 rounded-lg border border-accent/40 bg-accent px-3 py-1.5 text-[11.5px] font-medium text-white shadow-sm transition hover:brightness-110 glow-accent"
-              >
-                <Icon name="orbit" size={13} /> Play on YouTube ↗
-              </a>
-              {b.action?.payload?.musicUrl && (
-                <a
-                  href={b.action?.payload?.musicUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-surface px-2.5 py-1.5 text-[11.5px] font-medium text-muted transition hover:bg-white/5 hover:text-ink"
-                >
-                  YouTube Music ↗
-                </a>
+            <div className="mt-3 space-y-2.5 border-t border-line/60 pt-2.5">
+              {b.action?.payload?.videoId && (
+                <div className="relative overflow-hidden rounded-xl border border-line bg-black/60 shadow-lg">
+                  <div className="flex items-center justify-between border-b border-line/40 px-3 py-1.5 bg-black/40 text-[11px] text-muted">
+                    <span className="flex items-center gap-1.5 font-medium text-ink">
+                      <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
+                      Live Music Stream
+                    </span>
+                    <span className="text-[10px] text-muted">{b.action.payload.song}</span>
+                  </div>
+                  <iframe
+                    src={`https://www.youtube-nocookie.com/embed/${b.action.payload.videoId}?autoplay=1&enablejsapi=1`}
+                    title={b.action.payload.song || "Music Player"}
+                    className="h-[175px] w-full border-0"
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                    allowFullScreen
+                  />
+                </div>
               )}
-              {b.action?.payload?.spotifyUrl && (
-                <a
-                  href={b.action?.payload?.spotifyUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-surface px-2.5 py-1.5 text-[11.5px] font-medium text-muted transition hover:bg-white/5 hover:text-ink"
-                >
-                  Spotify ↗
-                </a>
-              )}
+              <div className="flex flex-wrap items-center gap-2">
+                {b.action?.payload?.musicUrl && (
+                  <a
+                    href={b.action?.payload?.musicUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-accent/40 bg-accent px-3 py-1.5 text-[11.5px] font-medium text-white shadow-sm transition hover:brightness-110 glow-accent"
+                  >
+                    <Icon name="orbit" size={13} /> Play on YouTube Music ↗
+                  </a>
+                )}
+                {b.action?.payload?.url && (
+                  <a
+                    href={b.action?.payload?.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-surface px-2.5 py-1.5 text-[11.5px] font-medium text-muted transition hover:bg-white/5 hover:text-ink"
+                  >
+                    YouTube ↗
+                  </a>
+                )}
+                {b.action?.payload?.spotifyUrl && (
+                  <a
+                    href={b.action?.payload?.spotifyUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-surface px-2.5 py-1.5 text-[11.5px] font-medium text-muted transition hover:bg-white/5 hover:text-ink"
+                  >
+                    Spotify ↗
+                  </a>
+                )}
+              </div>
             </div>
           )}
         </div>
@@ -621,7 +643,11 @@ export default function Chat({ initialMessages }: { initialMessages: Msg[] }) {
                 }),
               }).catch(() => {});
             } else if (blk.action.type === "music") {
-              const playUrl = blk.action.payload?.url;
+              const prefersYtMusic = blk.action.payload?.prefersYtMusic !== false;
+              const primaryUrl = blk.action.payload?.primaryUrl;
+              const musicUrl = blk.action.payload?.musicUrl;
+              const ytUrl = blk.action.payload?.url;
+              const playUrl = primaryUrl || (prefersYtMusic ? (musicUrl || ytUrl) : (ytUrl || musicUrl));
               let openedLocally = false;
               fetch("http://127.0.0.1:38291/play", {
                 method: "POST",
@@ -629,6 +655,10 @@ export default function Chat({ initialMessages }: { initialMessages: Msg[] }) {
                 body: JSON.stringify({
                   song: blk.action.payload?.song,
                   url: playUrl,
+                  musicUrl,
+                  ytUrl,
+                  videoId: blk.action.payload?.videoId,
+                  prefersYtMusic,
                 }),
               })
                 .then((r) => {
