@@ -441,11 +441,11 @@ export async function runTool(toolId: string, params: Record<string, any>, _ctx?
       try {
         const ytRes = await fetch(`https://www.youtube.com/results?search_query=${encodeURIComponent(song)}`, {
           headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" },
-          signal: AbortSignal.timeout(2500),
+          signal: AbortSignal.timeout(4500),
         });
         if (ytRes.ok) {
           const html = await ytRes.text();
-          const m = html.match(/videoId.:.([a-zA-Z0-9_-]{11})/);
+          const m = html.match(/videoId.:.([a-zA-Z0-9_-]{11})/) || html.match(/\/watch\?v=([a-zA-Z0-9_-]{11})/);
           if (m && m[1]) {
             ytUrl = `https://www.youtube.com/watch?v=${m[1]}&autoplay=1`;
             musicUrl = `https://music.youtube.com/watch?v=${m[1]}`;

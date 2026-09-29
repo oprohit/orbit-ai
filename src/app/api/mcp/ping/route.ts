@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { asc } from "drizzle-orm";
+import { asc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { mcpServers } from "@/db/schema";
 
@@ -16,7 +16,7 @@ export async function POST() {
           status: "connected",
           health: "healthy",
           lastUsed: now,
-        }).where(asc(mcpServers.id));
+        }).where(eq(mcpServers.id, srv.id));
         const latency = Math.floor(Math.random() * 8) + 3; // 3-10ms local MCP socket response
 
         return {
