@@ -323,6 +323,31 @@ function startDesktopAgent() {
       return;
     }
 
+    if (url.pathname === "/notify" && req.method === "POST") {
+      let body = "";
+      req.on("data", (chunk) => (body += chunk));
+      req.on("end", async () => {
+        try {
+          const parsed = body ? JSON.parse(body) : {};
+          const title = String(parsed.title || "Orbit AI Reminder").replace(/'/g, "''").replace(/"/g, '`"');
+          const message = String(parsed.message || "Your scheduled reminder is due!").replace(/'/g, "''").replace(/"/g, '`"');
+
+          // Trigger Windows audible chime and balloon notification
+          if (process.platform === "win32") {
+            const psCmd = `powershell -NoProfile -Command "[System.Media.SystemSounds]::Exclamation.Play(); Add-Type -AssemblyName System.Windows.Forms; $notify = New-Object System.Windows.Forms.NotifyIcon; $notify.Icon = [System.Drawing.SystemIcons]::Information; $notify.Visible = $true; $notify.ShowBalloonTip(6000, '${title}', '${message}', [System.Windows.Forms.ToolTipIcon]::Info)"`;
+            exec(psCmd, () => {});
+          }
+
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ ok: true, notified: true }));
+        } catch (e) {
+          res.writeHead(500, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: e.message }));
+        }
+      });
+      return;
+    }
+
     if (url.pathname === "/clean" && req.method === "POST") {
       let body = "";
       req.on("data", (chunk) => (body += chunk));
@@ -479,6 +504,26 @@ function startDesktopAgent() {
           }
           res.writeHead(200, { "Content-Type": "application/json" });
           res.end(JSON.stringify({ ok: true, opened: targetPath }));
+        } catch (e) {
+          res.writeHead(500, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: e.message }));
+        }
+      });
+      return;
+    }
+
+    if (url.pathname === "/notify" && req.method === "POST") {
+      let body = "";
+      req.on("data", (chunk) => (body += chunk));
+      req.on("end", () => {
+        try {
+          const parsed = body ? JSON.parse(body) : {};
+          const title = (parsed.title || "Orbit Reminder Alert").replace(/"/g, '`"');
+          const message = (parsed.message || "Your scheduled reminder is due!").replace(/"/g, '`"');
+          // Play physical Windows beep/chime and show notification
+          exec(`powershell -Command "[System.Media.SystemSounds]::Exclamation.Play()"`);
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ ok: true, alerted: true, title, message }));
         } catch (e) {
           res.writeHead(500, { "Content-Type": "application/json" });
           res.end(JSON.stringify({ error: e.message }));

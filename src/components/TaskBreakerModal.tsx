@@ -8,10 +8,28 @@ export default function TaskBreakerModal() {
   const [isOpen, setIsOpen] = useState(false);
   const [isMinimized, setIsMinimized] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isPinned, setIsPinned] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    try {
+      return localStorage.getItem("orbit_task_breaker_pinned") === "true";
+    } catch {
+      return false;
+    }
+  });
   const [activeTab, setActiveTab] = useState<"flowchart" | "explorer">("flowchart");
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [completedIds, setCompletedIds] = useState<Record<string, boolean>>({});
+
+  const togglePin = () => {
+    setIsPinned((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem("orbit_task_breaker_pinned", String(next));
+      } catch {}
+      return next;
+    });
+  };
 
   // Load saved state from localStorage
   useEffect(() => {
@@ -173,73 +191,87 @@ export default function TaskBreakerModal() {
   }
 
   // Full Expanded Task Breaker Studio Window
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 md:p-6 bg-black/75 backdrop-blur-sm animate-fade-in">
-      <div
-        className={`flex flex-col rounded-2xl border border-line bg-surface shadow-2xl transition-all duration-200 ${
-          isFullscreen
-            ? "h-[98vh] w-[98vw] max-w-none"
-            : "h-[90vh] max-h-[860px] w-full max-w-6xl"
-        }`}
-      >
-        {/* Top Studio Header Bar */}
-        <div className="flex items-center justify-between border-b border-line px-5 py-3.5 bg-bg/50">
-          <div className="flex items-center gap-3">
-            <span className="grid h-8 w-8 place-items-center rounded-lg bg-accent/15 text-accent font-bold text-sm">
-              🎯
-            </span>
-            <div>
-              <div className="flex items-center gap-2">
-                <h2 className="text-[15px] font-semibold text-ink">
-                  Task Breaker Studio · 110-Step Interactive Roadmap
-                </h2>
-                <Badge tone="accent">GATE CS & IT</Badge>
-              </div>
-              <p className="text-[11px] text-faint">
-                Curated milestones, subtasks checklist, weightage breakdown & YouTube lecture playlists
-              </p>
+  const studioContent = (
+    <div
+      className={`flex flex-col bg-surface transition-all duration-200 ${
+        isPinned
+          ? "h-full w-full"
+          : isFullscreen
+          ? "h-[98vh] w-[98vw] max-w-none rounded-2xl border border-line shadow-2xl"
+          : "h-[90vh] max-h-[860px] w-full max-w-6xl rounded-2xl border border-line shadow-2xl"
+      }`}
+    >
+      {/* Top Studio Header Bar */}
+      <div className="flex items-center justify-between border-b border-line px-4 md:px-5 py-3.5 bg-bg/50">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-accent/15 text-accent font-bold text-sm">
+            🎯
+          </span>
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <h2 className="text-[14.5px] font-semibold text-ink truncate">
+                Task Breaker Studio · 110-Step Interactive Roadmap
+              </h2>
+              <Badge tone="accent">GATE CS & IT</Badge>
             </div>
+            <p className="text-[11px] text-faint truncate">
+              Curated milestones, subtasks checklist, weightage breakdown & YouTube lecture playlists
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 shrink-0">
+          {/* View Switcher */}
+          <div className="flex rounded-lg border border-line bg-bg p-0.5 text-xs">
+            <button
+              onClick={() => setActiveTab("flowchart")}
+              className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[11.5px] font-medium transition-colors ${
+                activeTab === "flowchart"
+                  ? "bg-accent/20 text-accent font-semibold"
+                  : "text-muted hover:text-ink"
+              }`}
+            >
+              <span>⚡</span> Flowchart View
+            </button>
+            <button
+              onClick={() => setActiveTab("explorer")}
+              className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[11.5px] font-medium transition-colors ${
+                activeTab === "explorer"
+                  ? "bg-accent/20 text-accent font-semibold"
+                  : "text-muted hover:text-ink"
+              }`}
+            >
+              <span>📋</span> Step Explorer
+            </button>
           </div>
 
-          <div className="flex items-center gap-2">
-            {/* View Switcher */}
-            <div className="flex rounded-lg border border-line bg-bg p-0.5 text-xs">
-              <button
-                onClick={() => setActiveTab("flowchart")}
-                className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[11.5px] font-medium transition-colors ${
-                  activeTab === "flowchart"
-                    ? "bg-accent/20 text-accent font-semibold"
-                    : "text-muted hover:text-ink"
-                }`}
-              >
-                <span>⚡</span> Flowchart View
-              </button>
-              <button
-                onClick={() => setActiveTab("explorer")}
-                className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[11.5px] font-medium transition-colors ${
-                  activeTab === "explorer"
-                    ? "bg-accent/20 text-accent font-semibold"
-                    : "text-muted hover:text-ink"
-                }`}
-              >
-                <span>📋</span> Step Explorer
-              </button>
-            </div>
-
-            {/* Window Controls: Minimize, Maximize, Close */}
-            <div className="flex items-center gap-1 border-l border-line pl-2 ml-1">
-              <button
-                onClick={() => {
-                  setIsMinimized(true);
-                  setIsOpen(false);
-                }}
-                className="rounded-lg p-1.5 text-muted hover:bg-white/10 hover:text-accent transition-colors"
-                title="Minimize (keep chatting while working)"
-              >
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M5 12h14" />
-                </svg>
-              </button>
+          {/* Window Controls: Pin to Side, Minimize, Maximize, Close */}
+          <div className="flex items-center gap-1 border-l border-line pl-2 ml-1">
+            <button
+              onClick={togglePin}
+              className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[11.5px] font-medium transition-colors ${
+                isPinned
+                  ? "bg-accent/25 text-accent font-semibold border border-accent/40"
+                  : "text-muted hover:bg-white/10 hover:text-ink"
+              }`}
+              title={isPinned ? "Unpin from side (switch to center modal)" : "Pin to side (keep studio visible while chatting)"}
+            >
+              <span>📌</span>
+              <span className="hidden sm:inline">{isPinned ? "Pinned to Side" : "Pin to Side"}</span>
+            </button>
+            <button
+              onClick={() => {
+                setIsMinimized(true);
+                setIsOpen(false);
+              }}
+              className="rounded-lg p-1.5 text-muted hover:bg-white/10 hover:text-accent transition-colors"
+              title="Minimize (keep chatting while working)"
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M5 12h14" />
+              </svg>
+            </button>
+            {!isPinned && (
               <button
                 onClick={() => setIsFullscreen(!isFullscreen)}
                 className="rounded-lg p-1.5 text-muted hover:bg-white/10 hover:text-ink transition-colors"
@@ -249,19 +281,20 @@ export default function TaskBreakerModal() {
                   <rect x="3" y="3" width="18" height="18" rx="2" />
                 </svg>
               </button>
-              <button
-                onClick={() => {
-                  setIsOpen(false);
-                  setIsMinimized(false);
-                }}
-                className="rounded-lg p-1.5 text-muted hover:bg-white/10 hover:text-danger transition-colors"
-                title="Close"
-              >
-                <Icon name="x" size={15} />
-              </button>
-            </div>
+            )}
+            <button
+              onClick={() => {
+                setIsOpen(false);
+                setIsMinimized(false);
+              }}
+              className="rounded-lg p-1.5 text-muted hover:bg-white/10 hover:text-danger transition-colors"
+              title="Close"
+            >
+              <Icon name="x" size={15} />
+            </button>
           </div>
         </div>
+      </div>
 
         {/* Global Progress Bar Bar */}
         <div className="flex items-center justify-between border-b border-line/60 bg-bg/25 px-5 py-2.5">
@@ -524,6 +557,19 @@ export default function TaskBreakerModal() {
           </div>
         </div>
       </div>
+  );
+
+  if (isPinned) {
+    return (
+      <div className="fixed top-0 right-0 bottom-0 z-40 w-full sm:w-[480px] md:w-[540px] lg:w-[580px] xl:w-[620px] border-l border-line bg-surface/98 shadow-2xl backdrop-blur-xl flex flex-col">
+        {studioContent}
+      </div>
+    );
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 md:p-6 bg-black/75 backdrop-blur-sm animate-fade-in">
+      {studioContent}
     </div>
   );
 }

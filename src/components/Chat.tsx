@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Badge, Btn, Icon, Progress, RiskBadge, StatusDot, fmtInr } from "./ui";
@@ -110,6 +110,181 @@ function ApprovalCard({ a, onDecide, busy }: { a: ApprovalRow; onDecide: (id: st
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function playChimeSound() {
+  try {
+    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioCtx) return;
+    const ctx = new AudioCtx();
+    if (ctx.state === "suspended") {
+      ctx.resume();
+    }
+    const now = ctx.currentTime;
+
+    const playTone = (freq: number, start: number, duration: number, vol = 0.35) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(freq, start);
+      gain.gain.setValueAtTime(vol, start);
+      gain.gain.exponentialRampToValueAtTime(0.0001, start + duration);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(start);
+      osc.stop(start + duration);
+    };
+
+    // First sequence
+    playTone(587.33, now, 0.45);        // D5
+    playTone(880.00, now + 0.15, 0.55); // A5
+    playTone(1174.66, now + 0.30, 0.8); // D6
+
+    // Echo sequence
+    playTone(587.33, now + 0.7, 0.45);
+    playTone(880.00, now + 0.85, 0.55);
+    playTone(1174.66, now + 1.0, 1.2);
+  } catch (err) {
+    console.warn("Could not play Web Audio chime:", err);
+  }
+}
+
+function ReminderTimerCard({ payload }: { payload: { title: string; targetTime: string; durationSeconds: number; taskId?: string } }) {
+  const [timeLeftMs, setTimeLeftMs] = useState<number>(() => {
+    const target = new Date(payload.targetTime).getTime();
+    return Math.max(0, target - Date.now());
+  });
+  const [dismissed, setDismissed] = useState(false);
+  const audioPlayedRef = useRef(false);
+
+  const targetDate = useMemo(() => new Date(payload.targetTime), [payload.targetTime]);
+  const totalDurationMs = Math.max(1000, (payload.durationSeconds || 10) * 1000);
+
+  // Request browser Notification permission on mount
+  useEffect(() => {
+    if (typeof window !== "undefined" && "Notification" in window) {
+      if (Notification.permission === "default") {
+        Notification.requestPermission().catch(() => {});
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const remaining = Math.max(0, targetDate.getTime() - Date.now());
+      setTimeLeftMs(remaining);
+
+      if (remaining <= 0 && !audioPlayedRef.current) {
+        audioPlayedRef.current = true;
+        // 1. Play audible chime via Web Audio API
+        playChimeSound();
+
+        // 2. Trigger browser desktop notification
+        if (typeof window !== "undefined" && "Notification" in window && Notification.permission === "granted") {
+          try {
+            new Notification(`⏰ Orbit AI Reminder: ${payload.title}`, {
+              body: `Your scheduled reminder for "${payload.title}" is due now!`,
+              icon: "/favicon.ico",
+            });
+          } catch {}
+        }
+
+        // 3. Trigger Windows companion agent sound & balloon tip
+        fetch("http://127.0.0.1:38291/notify", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            title: `⏰ Orbit Reminder: ${payload.title}`,
+            message: `Time to: ${payload.title}!`,
+          }),
+        }).catch(() => {});
+      }
+    }, 100);
+
+    return () => clearInterval(interval);
+  }, [targetDate, payload.title]);
+
+  if (dismissed) return null;
+
+  const isExpired = timeLeftMs <= 0;
+  const remainingSeconds = Math.ceil(timeLeftMs / 1000);
+  const minutes = Math.floor(remainingSeconds / 60);
+  const seconds = remainingSeconds % 60;
+  const formattedCountdown = minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
+  const pct = Math.max(0, Math.min(100, Math.round((timeLeftMs / totalDurationMs) * 100)));
+
+  return (
+    <div
+      className={`fade-up mt-3 overflow-hidden rounded-xl border transition-all duration-300 ${
+        isExpired
+          ? "border-amber-500/80 bg-amber-500/10 shadow-[0_0_24px_rgba(245,158,11,0.3)] animate-pulse"
+          : "border-accent/40 bg-surface/90 shadow-lg"
+      } p-3.5`}
+    >
+      <div className="flex items-center justify-between gap-2 border-b border-line/60 pb-2.5">
+        <div className="flex items-center gap-2">
+          <span className="text-base">{isExpired ? "🔔" : "⏱️"}</span>
+          <span className="text-[13px] font-semibold text-ink">
+            {isExpired ? "Reminder Due Now!" : "Active Live Reminder"}
+          </span>
+        </div>
+        <span
+          className={`rounded-full px-2.5 py-0.5 font-mono text-[11px] font-bold ${
+            isExpired
+              ? "bg-amber-500/25 text-amber-300 border border-amber-500/40"
+              : "bg-accent/20 text-accent border border-accent/30"
+          }`}
+        >
+          {isExpired ? "ALARM RINGING" : `${formattedCountdown} remaining`}
+        </span>
+      </div>
+
+      <div className="mt-2.5 space-y-1.5 text-[12.5px]">
+        <div className="flex items-baseline justify-between text-ink font-medium">
+          <span className="text-sm">🎯 {payload.title}</span>
+          <span className="text-[11px] text-faint">
+            {targetDate.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+          </span>
+        </div>
+
+        {!isExpired ? (
+          <div className="space-y-1">
+            <div className="h-2 w-full overflow-hidden rounded-full bg-white/10">
+              <div
+                className="h-full bg-accent transition-all duration-100 ease-linear rounded-full"
+                style={{ width: `${pct}%` }}
+              />
+            </div>
+            <div className="flex justify-between text-[10.5px] text-muted font-mono">
+              <span>Countdown active</span>
+              <span>Target: {targetDate.toLocaleTimeString("en-IN")}</span>
+            </div>
+          </div>
+        ) : (
+          <div className="rounded-lg border border-amber-500/30 bg-amber-500/15 p-2 text-[12px] text-amber-200">
+            🔔 <strong>Time's up!</strong> Audio chime and system alert notification dispatched.
+          </div>
+        )}
+
+        <div className="flex items-center gap-2 pt-2 border-t border-line/50">
+          <button
+            type="button"
+            onClick={playChimeSound}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-accent/40 bg-accent-soft px-3 py-1 text-[11.5px] font-medium text-accent hover:brightness-110"
+          >
+            <span>🔊</span> Play Chime
+          </button>
+          <button
+            type="button"
+            onClick={() => setDismissed(true)}
+            className="ml-auto inline-flex items-center gap-1 rounded-lg border border-line bg-surface px-2.5 py-1 text-[11.5px] text-muted hover:text-ink hover:bg-white/5"
+          >
+            Dismiss
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -308,6 +483,9 @@ function BlockView({
         <div className="fade-up rounded-xl border border-line bg-surface p-3.5">
           <div className="mb-1.5 text-[12px] font-semibold text-ink">{b.title}</div>
           <div className="space-y-1">{b.lines.map((l, i) => <div key={i} className="text-[12px] text-muted">{l}</div>)}</div>
+          {b.action?.type === "reminder_alert" && b.action?.payload && (
+            <ReminderTimerCard payload={b.action.payload as any} />
+          )}
           {b.action?.type === "mkdir" && (
             <div className="mt-3 flex items-center gap-2 border-t border-line/60 pt-2.5">
               <button
@@ -655,6 +833,122 @@ export default function Chat({ initialMessages }: { initialMessages: Msg[] }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
 
+  // MediaRecorder audio capture states for Electron & fallback
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
+  const [isRecordingAudio, setIsRecordingAudio] = useState(false);
+  const [isTranscribing, setIsTranscribing] = useState(false);
+  const recordingTimerRef = useRef<any>(null);
+
+  const stopMediaRecording = useCallback(() => {
+    if (recordingTimerRef.current) clearTimeout(recordingTimerRef.current);
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+      try {
+        mediaRecorderRef.current.stop();
+      } catch {}
+    }
+  }, []);
+
+  const startMediaRecording = useCallback(async () => {
+    try {
+      if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
+        alert("Audio recording is not supported in this environment.");
+        return;
+      }
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      mediaStreamRef.current = stream;
+
+      let mimeType = "audio/webm";
+      if (typeof MediaRecorder !== "undefined") {
+        if (MediaRecorder.isTypeSupported("audio/webm;codecs=opus")) mimeType = "audio/webm;codecs=opus";
+        else if (MediaRecorder.isTypeSupported("audio/webm")) mimeType = "audio/webm";
+        else if (MediaRecorder.isTypeSupported("audio/mp4")) mimeType = "audio/mp4";
+        else if (MediaRecorder.isTypeSupported("audio/ogg")) mimeType = "audio/ogg";
+      }
+
+      const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+      mediaRecorderRef.current = recorder;
+      audioChunksRef.current = [];
+
+      recorder.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) {
+          audioChunksRef.current.push(e.data);
+        }
+      };
+
+      recorder.onstop = async () => {
+        if (mediaStreamRef.current) {
+          mediaStreamRef.current.getTracks().forEach((track) => track.stop());
+          mediaStreamRef.current = null;
+        }
+
+        if (audioChunksRef.current.length === 0) {
+          setIsRecordingAudio(false);
+          setListening(false);
+          return;
+        }
+
+        const audioBlob = new Blob(audioChunksRef.current, { type: recorder.mimeType || mimeType });
+        if (audioBlob.size < 400) {
+          setIsRecordingAudio(false);
+          setListening(false);
+          return;
+        }
+
+        setIsTranscribing(true);
+        try {
+          const reader = new FileReader();
+          reader.onloadend = async () => {
+            try {
+              const base64Data = (reader.result as string)?.split(",")[1];
+              if (!base64Data) return;
+
+              const res = await fetch("/api/transcribe", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  audio: base64Data,
+                  mimeType: recorder.mimeType || mimeType,
+                }),
+              });
+              const data = await res.json();
+              if (data.ok && data.transcript) {
+                setInput((prev) => (prev ? `${prev} ${data.transcript}` : data.transcript));
+              }
+            } catch (err) {
+              console.error("Transcribe failed:", err);
+            } finally {
+              setIsTranscribing(false);
+              setIsRecordingAudio(false);
+              setListening(false);
+            }
+          };
+          reader.readAsDataURL(audioBlob);
+        } catch (e) {
+          console.error("Error reading audio data:", e);
+          setIsTranscribing(false);
+          setIsRecordingAudio(false);
+          setListening(false);
+        }
+      };
+
+      recorder.start(250);
+      setIsRecordingAudio(true);
+      setListening(true);
+
+      if (recordingTimerRef.current) clearTimeout(recordingTimerRef.current);
+      recordingTimerRef.current = setTimeout(() => {
+        stopMediaRecording();
+      }, 30000);
+    } catch (err: any) {
+      console.error("Microphone error:", err);
+      alert("Microphone permission or hardware error: " + (err.message || "Could not access microphone"));
+      setIsRecordingAudio(false);
+      setListening(false);
+    }
+  }, [stopMediaRecording]);
+
   const loadApprovals = useCallback(async () => {
     try {
       const res = await fetch("/api/approvals");
@@ -670,9 +964,16 @@ export default function Chat({ initialMessages }: { initialMessages: Msg[] }) {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [messages, busy]);
 
-  // Setup Web Speech Recognition
+  // Setup Web Speech Recognition for standard browsers
   useEffect(() => {
     if (typeof window !== "undefined") {
+      const isElectron = !!(window as any).orbitDesktop?.isDesktop || navigator.userAgent.toLowerCase().includes("electron");
+      if (isElectron) {
+        // In Electron, enable mic support via MediaRecorder
+        setSpeechSupported(true);
+        return;
+      }
+
       const SpeechRec = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
       if (SpeechRec) {
         setSpeechSupported(true);
@@ -692,6 +993,9 @@ export default function Chat({ initialMessages }: { initialMessages: Msg[] }) {
         rec.onerror = (e: any) => {
           console.warn("Speech recognition error:", e);
           setListening(false);
+          if (e.error === "network" || e.error === "not-allowed" || e.error === "service-not-allowed") {
+            void startMediaRecording();
+          }
         };
 
         rec.onend = () => {
@@ -699,15 +1003,39 @@ export default function Chat({ initialMessages }: { initialMessages: Msg[] }) {
         };
 
         recognitionRef.current = rec;
+      } else {
+        setSpeechSupported(true);
       }
     }
-  }, []);
+  }, [startMediaRecording]);
 
   const toggleListening = () => {
-    if (!speechSupported || !recognitionRef.current) {
-      alert("Speech recognition is not supported in this browser. Please use Google Chrome or Microsoft Edge.");
+    const isElectron = typeof window !== "undefined" && (
+      !!(window as any).orbitDesktop?.isDesktop ||
+      navigator.userAgent.toLowerCase().includes("electron")
+    );
+
+    // In Electron, webkitSpeechRecognition fails on Google API authorization.
+    // Always use MediaRecorder with Gemini transcription.
+    if (isElectron) {
+      if (isRecordingAudio || listening) {
+        stopMediaRecording();
+      } else {
+        void startMediaRecording();
+      }
       return;
     }
+
+    if (isRecordingAudio) {
+      stopMediaRecording();
+      return;
+    }
+
+    if (!recognitionRef.current) {
+      void startMediaRecording();
+      return;
+    }
+
     if (listening) {
       try { recognitionRef.current.stop(); } catch {}
       setListening(false);
@@ -716,7 +1044,8 @@ export default function Chat({ initialMessages }: { initialMessages: Msg[] }) {
         recognitionRef.current.start();
         setListening(true);
       } catch (err) {
-        console.error("Failed to start speech recognition:", err);
+        console.warn("SpeechRecognition start failed, switching to MediaRecorder:", err);
+        void startMediaRecording();
       }
     }
   };
@@ -943,22 +1272,32 @@ export default function Chat({ initialMessages }: { initialMessages: Msg[] }) {
         )}
       </div>
 
-      {/* Voice Listening Banner */}
-      {listening && (
-        <div className="fade-up mb-2 flex items-center justify-between rounded-lg border border-accent/40 bg-accent/10 px-3 py-1.5 text-[11.5px] text-accent">
+      {/* Voice Listening / Recording / Transcribing Banner */}
+      {(listening || isRecordingAudio || isTranscribing) && (
+        <div className={`fade-up mb-2 flex items-center justify-between rounded-lg border px-3 py-1.5 text-[11.5px] ${
+          isTranscribing
+            ? "border-amber-500/40 bg-amber-500/10 text-amber-300"
+            : "border-danger/40 bg-danger/10 text-danger"
+        }`}>
           <div className="flex items-center gap-2.5">
             <span className="relative flex h-2.5 w-2.5">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent opacity-75" />
-              <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-accent" />
+              <span className={`absolute inline-flex h-full w-full animate-ping rounded-full ${isTranscribing ? "bg-amber-400" : "bg-danger"} opacity-75`} />
+              <span className={`relative inline-flex h-2.5 w-2.5 rounded-full ${isTranscribing ? "bg-amber-400" : "bg-danger"}`} />
             </span>
-            <span className="font-medium">Listening to speech… speak your goal or command now</span>
+            <span className="font-medium">
+              {isTranscribing
+                ? "⏳ Transcribing voice command with Gemini AI..."
+                : isRecordingAudio
+                ? "🎙️ Recording voice command... Speak now (Click mic or button to stop & transcribe)"
+                : "🎙️ Listening to speech… speak your goal or command now"}
+            </span>
           </div>
           <button
             type="button"
             onClick={toggleListening}
             className="rounded px-2 py-0.5 text-[10.5px] font-semibold uppercase tracking-wider text-muted transition hover:bg-white/10 hover:text-ink"
           >
-            Cancel
+            {isRecordingAudio ? "Stop & Transcribe" : "Cancel"}
           </button>
         </div>
       )}
@@ -1005,7 +1344,7 @@ export default function Chat({ initialMessages }: { initialMessages: Msg[] }) {
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void send(input); } }}
           rows={1}
-          placeholder={listening ? "Listening... speak now" : attachment ? `Add instructions for ${attachment.name}...` : 'Give it a goal — "What\'s important today?" · "Create a folder named Projects on desktop"'}
+          placeholder={isRecordingAudio ? "🎙️ Recording... Click mic to finish" : listening ? "Listening... speak now" : attachment ? `Add instructions for ${attachment.name}...` : 'Give it a goal — "What\'s important today?" · "Create a folder named Projects on desktop"'}
           className="max-h-28 min-h-[38px] flex-1 resize-none bg-transparent px-2 py-1.5 text-[13.5px] text-ink placeholder:text-faint"
         />
 
@@ -1023,9 +1362,19 @@ export default function Chat({ initialMessages }: { initialMessages: Msg[] }) {
         <button
           type="button"
           onClick={toggleListening}
-          title={listening ? "Stop listening" : "Speak voice command (Click to speak)"}
+          title={
+            isTranscribing
+              ? "Transcribing voice with Gemini..."
+              : isRecordingAudio
+              ? "Recording active! Click to finish & transcribe"
+              : listening
+              ? "Stop listening"
+              : "Speak voice command (Click to speak)"
+          }
           className={`grid h-9 w-9 shrink-0 place-items-center rounded-lg border transition ${
-            listening
+            isTranscribing
+              ? "border-amber-500 bg-amber-500/20 text-amber-300 animate-pulse"
+              : listening || isRecordingAudio
               ? "border-danger bg-danger text-white animate-pulse shadow-md"
               : "border-line bg-white/[0.04] text-muted hover:border-accent/40 hover:text-accent hover:bg-accent/10"
           }`}

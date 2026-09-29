@@ -36,7 +36,23 @@ function createWindow() {
   });
 }
 
+app.commandLine.appendSwitch("enable-speech-dispatcher");
+app.commandLine.appendSwitch("enable-features", "AudioServiceOutOfProcess");
+app.commandLine.appendSwitch("autoplay-policy", "no-user-gesture-required");
+
 app.whenReady().then(() => {
+  // Grant microphone, media, and notification permissions automatically
+  const { session } = require("electron");
+  session.defaultSession.setPermissionRequestHandler((webContents, permission, callback) => {
+    if (["media", "audioCapture", "microphone", "notifications"].includes(permission)) {
+      return callback(true);
+    }
+    callback(true);
+  });
+  session.defaultSession.setPermissionCheckHandler((webContents, permission) => {
+    return true;
+  });
+
   // 1. Start the local Windows companion agent
   try {
     agentServer = startDesktopAgent();

@@ -419,7 +419,7 @@ async function hJobs(m: string, { runId }: Ctx): Promise<ChatContent> {
   };
 }
 
-const GOAL_TEMPLATES: Record<string, { title: string; desc: string; ms: [string, string][]; tasks: { title: string; priority: string; days: number; hour: number }[] }> = {
+const GOAL_TEMPLATES: Record<string, { title: string; desc: string; ms: [string, string][]; tasks: { title: string; priority: "high" | "medium" | "low"; days: number; hour: number }[] }> = {
   gate: {
     title: "GATE Preparation — Computer Science & IT",
     desc: "Comprehensive 6–8 month structured study roadmap, high-weightage subjects, PYQs on GateOverflow, and timed diagnostic full-length mocks.",
@@ -476,27 +476,131 @@ const GOAL_TEMPLATES: Record<string, { title: string; desc: string; ms: [string,
   },
 };
 
-async function hGoal(m: string, { runId }: Ctx): Promise<ChatContent> {
-  const isGate = /gate|graduate aptitude/i.test(m);
-  const isDsa = /dsa|data structure|leetcode|coding interview|algorithm/i.test(m);
-  const isIntern = /internship|job|placement/i.test(m);
-  const isExam = /exam|assessment|study|prepare/i.test(m);
+function buildDynamicGoal(m: string): {
+  title: string;
+  desc: string;
+  ms: [string, string][];
+  tasks: { title: string; priority: "high" | "medium" | "low"; days: number; hour: number }[];
+} {
+  // 1. GATE Exam
+  if (/gate\b|graduate aptitude/i.test(m)) {
+    return GOAL_TEMPLATES.gate;
+  }
 
-  const key = isGate ? "gate" : isDsa ? "dsa" : isIntern ? "internship" : isExam ? "exam" : "gate";
-  const tpl = GOAL_TEMPLATES[key] || GOAL_TEMPLATES.gate;
+  // 2. DSA / Coding Interviews
+  if (/\b(?:dsa|leetcode|coding interview|algorithms?|data structures?)\b/i.test(m)) {
+    return GOAL_TEMPLATES.dsa;
+  }
 
-  const searchKeyword = isGate ? "GATE" : isIntern ? "Internship" : isDsa ? "DSA" : "Assessment";
-  const existing = await findGoal(searchKeyword);
-  if (existing && existing.status === "active") {
-    const rows = await db.select().from(tasks).where(eq(tasks.goalId, existing.id)).limit(6);
+  // 3. React / Software Internship / Jobs
+  if (/\binternship|placement|job hunt|react job\b/i.test(m)) {
+    return GOAL_TEMPLATES.internship;
+  }
+
+  // 4. Day Trading / Stock Market / Crypto / Investing
+  if (/\b(?:day\s*trading|stock\s*market|trading|stocks?|forex|crypto|swing\s*trading|investing)\b/i.test(m)) {
     return {
-      text: `Your ${existing.title} goal is already active on your Goals board: ${existing.currentValue ?? 0}/${existing.targetValue ?? 4} done. Next: ${existing.nextAction ?? "review your tasks"}.`,
-      blocks: [await goalBlock(existing), { type: "tasks", items: taskBlock(rows) }],
+      title: "Day Trading Mastery & Risk Discipline",
+      desc: "Structured roadmap to master technical analysis, price action, risk management, and disciplined trading execution.",
+      ms: [
+        ["Phase 1: Market Fundamentals", "Brokers, platform setup, order types (limit/stop), bid-ask spreads"],
+        ["Phase 2: Technical Analysis & Price Action", "Candlestick patterns, support/resistance, trendlines, volume"],
+        ["Phase 3: Risk Management & Psychology", "1% capital risk rule, risk-to-reward ratio 1:2+, trading journal"],
+        ["Phase 4: Simulated Paper Trading", "50 logged paper trades with strict rules before live capital"],
+        ["Phase 5: Live Execution & Review", "Small size live trading, daily P&L logging, weekly strategy review"],
+      ],
+      tasks: [
+        { title: "Setup TradingView and register demo paper trading account", priority: "high", days: 1, hour: 10 },
+        { title: "Study candlestick patterns, market structure & trendlines", priority: "high", days: 2, hour: 17 },
+        { title: "Draft written risk management rules and position sizing calculator", priority: "high", days: 3, hour: 18 },
+        { title: "Backtest core entry/exit strategy across 20 historical chart days", priority: "medium", days: 4, hour: 16 },
+        { title: "Execute first 5 simulated paper trades and log entries in trading journal", priority: "medium", days: 6, hour: 11 },
+      ],
+    };
+  }
+
+  // 5. Machine Learning / AI / Data Science
+  if (/\b(?:machine learning|data science|artificial intelligence|\bai\b|deep learning|python for ml)\b/i.test(m)) {
+    return {
+      title: "Machine Learning & AI Engineering",
+      desc: "Comprehensive roadmap covering mathematics, Python libraries, ML algorithms, neural networks, and model deployment.",
+      ms: [
+        ["Phase 1: Math & Python Foundations", "Linear algebra, calculus, NumPy, Pandas, Matplotlib"],
+        ["Phase 2: Core Machine Learning", "Supervised (regression, trees) & unsupervised (clustering, PCA)"],
+        ["Phase 3: Deep Learning & Frameworks", "Neural networks, PyTorch/TensorFlow, CNNs, Transformers"],
+        ["Phase 4: Capstone Portfolio Projects", "Kaggle competitions, end-to-end deployed web demo with FastAPI/Streamlit"],
+      ],
+      tasks: [
+        { title: "Complete NumPy & Pandas data manipulation workshop", priority: "high", days: 1, hour: 18 },
+        { title: "Implement Linear and Logistic Regression from scratch", priority: "high", days: 3, hour: 17 },
+        { title: "Train and evaluate Random Forest model on Kaggle tabular dataset", priority: "medium", days: 5, hour: 16 },
+        { title: "Build and deploy interactive ML model demo on HuggingFace Spaces", priority: "medium", days: 8, hour: 11 },
+      ],
+    };
+  }
+
+  // 6. Fitness / Marathon / Gym / Health
+  if (/\b(?:fitness|marathon|gym|weight loss|muscle|running|workout)\b/i.test(m)) {
+    return {
+      title: "Fitness & Physical Peak Conditioning",
+      desc: "Systematic program for progressive strength training, cardio conditioning, and structured nutrition.",
+      ms: [
+        ["Phase 1: Baseline Assessment & Nutrition", "TDEE calculation, macro split, baseline endurance test"],
+        ["Phase 2: Progressive Overload & Form", "Core compound lifts, running cadence, recovery protocols"],
+        ["Phase 3: Peak Conditioning & Performance", "High-intensity intervals, weekly progressive distance increases"],
+      ],
+      tasks: [
+        { title: "Calculate daily TDEE macro targets and plan weekly meal prep", priority: "high", days: 1, hour: 9 },
+        { title: "Complete 30-minute baseline physical assessment & mobility routine", priority: "high", days: 2, hour: 7 },
+        { title: "Schedule 4 weekly training blocks in calendar", priority: "medium", days: 3, hour: 8 },
+        { title: "Weekly progress metrics logging (weight, volume, heart rate)", priority: "medium", days: 7, hour: 9 },
+      ],
+    };
+  }
+
+  // 7. General Dynamic Extraction for ANY other goal:
+  let topic = m
+    .replace(/\b(?:make\s+(?:this|it)\s+(?:as\s+)?(?:a\s+)?(?:long\s+term\s+)?goal|as\s+a\s+long\s+term\s+goal|as\s+a\s+goal|long\s+term\s+goal|set\s+(?:this|it)\s+as\s+goal|add\s+as\s+active\s+goal)\b/gi, "")
+    .replace(/\b(?:i\s+want\s+to\s+(?:learn|master|prepare\s+for|study|start|do|achieve)|want\s+to\s+learn|prepare\s+for|study\s+for|learn|master|goal\s+for|goal\s+to|create\s+a\s+goal\s+to)\b/gi, "")
+    .replace(/^[\s\-_:–—]+|[\s\-_:–—]+$/g, "")
+    .trim();
+
+  if (!topic || topic.length < 2) topic = "Target Skill & Mastery";
+  const formattedTopic = topic.split(/\s+/).map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
+
+  return {
+    title: `${formattedTopic} — Mastery Roadmap`,
+    desc: `Structured developmental pathway to achieve excellence and consistent progress in ${formattedTopic}.`,
+    ms: [
+      [`Phase 1: ${formattedTopic} Core Foundations`, "Essential principles, terminology, recommended curriculum, and setup"],
+      [`Phase 2: Hands-On Practice & Application`, "Executing foundational exercises, daily practice routines, and skill building"],
+      [`Phase 3: Intermediate Projects & Deep Dive`, "Complex problem solving, portfolio projects, and overcoming plateaus"],
+      [`Phase 4: Advanced Mastery & Review`, "Real-world capstone application, self-testing, and milestone assessment"],
+    ],
+    tasks: [
+      { title: `Curate top study materials and outline syllabus for ${formattedTopic}`, priority: "high", days: 1, hour: 10 },
+      { title: `Complete introductory practice session (60 min focused block)`, priority: "high", days: 2, hour: 17 },
+      { title: `Implement first practical project applying core concepts of ${formattedTopic}`, priority: "medium", days: 4, hour: 18 },
+      { title: `Conduct weekly revision and diagnostic self-assessment on ${formattedTopic}`, priority: "medium", days: 7, hour: 11 },
+    ],
+  };
+}
+
+async function hGoal(m: string, { runId }: Ctx): Promise<ChatContent> {
+  const tpl = buildDynamicGoal(m);
+
+  const existing = await db.select().from(goals).where(eq(goals.title, tpl.title));
+  const activeExisting = existing.find((g) => g.status === "active");
+  if (activeExisting) {
+    const rows = await db.select().from(tasks).where(eq(tasks.goalId, activeExisting.id)).limit(6);
+    return {
+      text: `Your **${activeExisting.title}** goal is already active on your Goals board: ${activeExisting.currentValue ?? 0}/${activeExisting.targetValue ?? 4} done. Next: ${activeExisting.nextAction ?? "review your tasks"}.`,
+      blocks: [await goalBlock(activeExisting), { type: "tasks", items: taskBlock(rows) }],
     };
   }
 
   const goalId = randomUUID();
-  const deadline = at(isGate ? 240 : isIntern ? 180 : 30, 23, 59);
+  const deadline = at(tpl.title.includes("GATE") ? 240 : 180, 23, 59);
 
   await db.insert(goals).values({
     id: goalId,
@@ -556,7 +660,7 @@ async function hGoal(m: string, { runId }: Ctx): Promise<ChatContent> {
   });
 
   return {
-    text: `🎯 I've added **"${tpl.title}"** as an **Active Goal** in your Orbit dashboard! Decomposed into ${tpl.ms.length} structured milestone phases with ${tpl.tasks.length} immediate preparation tasks. You can track your progress in real-time under the Goals tab.`,
+    text: `🎯 I've added **"${tpl.title}"** as an **Active Goal** in your Orbit dashboard!\n\nDecomposed into ${tpl.ms.length} structured milestone phases with ${tpl.tasks.length} immediate preparation tasks. You can track your progress in real-time under the Goals tab.`,
     blocks: [
       {
         type: "goal",
@@ -576,7 +680,7 @@ async function hGoal(m: string, { runId }: Ctx): Promise<ChatContent> {
         type: "chips",
         chips: [
           { label: "What's my next action?", send: "What's my next action?" },
-          { label: "Open Task Breaker (110 Steps)", send: "Open task breaker flowchart" },
+          { label: `Open Task Breaker (${tpl.title.split(" ")[0]})`, send: "Open task breaker flowchart" },
           { label: "What's important today?", send: "What's important today?" },
         ],
       },
@@ -585,23 +689,105 @@ async function hGoal(m: string, { runId }: Ctx): Promise<ChatContent> {
 }
 
 async function hRemind(m: string, { runId }: Ctx): Promise<ChatContent> {
-  const raw = m.replace(/^(please\s+)?remind me (tomorrow( morning)?|today|tonight)( (at \d{1,2}(:\d{2})?( ?[ap]m)?))? ?(?:to|that|about)? ?/i, "").trim();
-  const title = raw || "Reminder";
-  const off = /tomorrow/i.test(m) ? 1 : 0;
-  const hm = m.match(/(\d{1,2})(?::(\d{2}))?\s*([ap])m/i);
-  let hour = 9, minute = 0;
-  if (hm) {
-    hour = parseInt(hm[1], 10) % 12;
-    if (hm[3].toLowerCase() === "p" && hour < 12) hour += 12;
-    minute = hm[2] ? parseInt(hm[2], 10) : 0;
+  const now = new Date();
+  let deadline: Date = new Date(now.getTime() + 60 * 1000);
+  let durationSeconds = 0;
+  let isRelative = false;
+
+  // 1. Check relative seconds: "in 10sec", "in 10 seconds", "in 30s", "after 15 secs"
+  const secMatch = m.match(/(?:in|after)\s+(\d+)\s*(?:sec(?:ond)?s?|s\b)/i);
+  // 2. Check relative minutes: "in 5min", "in 5 minutes", "in 1m", "after 2 mins"
+  const minMatch = m.match(/(?:in|after)\s+(\d+)\s*(?:min(?:ute)?s?|m\b)/i);
+  // 3. Check relative hours: "in 1 hour", "in 2 hrs", "after 3 hours"
+  const hrMatch = m.match(/(?:in|after)\s+(\d+)\s*(?:hour|hr)s?\b/i);
+
+  if (secMatch) {
+    const secs = parseInt(secMatch[1], 10);
+    durationSeconds = secs;
+    deadline = new Date(now.getTime() + secs * 1000);
+    isRelative = true;
+  } else if (minMatch) {
+    const mins = parseInt(minMatch[1], 10);
+    durationSeconds = mins * 60;
+    deadline = new Date(now.getTime() + mins * 60 * 1000);
+    isRelative = true;
+  } else if (hrMatch) {
+    const hrs = parseInt(hrMatch[1], 10);
+    durationSeconds = hrs * 3600;
+    deadline = new Date(now.getTime() + hrs * 3600 * 1000);
+    isRelative = true;
+  } else {
+    const off = /tomorrow/i.test(m) ? 1 : 0;
+    const hm = m.match(/(\d{1,2})(?::(\d{2}))?\s*([ap])m/i);
+    let hour = 9, minute = 0;
+    if (hm) {
+      hour = parseInt(hm[1], 10) % 12;
+      if (hm[3].toLowerCase() === "p" && hour < 12) hour += 12;
+      minute = hm[2] ? parseInt(hm[2], 10) : 0;
+      deadline = at(off, hour, minute);
+      if (off === 0 && deadline.getTime() < now.getTime()) {
+        deadline = at(1, hour, minute);
+      }
+    } else {
+      deadline = at(off, hour, minute);
+    }
+    durationSeconds = Math.max(1, Math.round((deadline.getTime() - now.getTime()) / 1000));
   }
-  const deadline = at(off, hour, minute);
-  const r = await execTool("task.create", { title: `Reminder: ${title}`, deadline, priority: "medium", source: "User" }, { runId });
+
+  // Extract clean task title from prompt:
+  let cleanTitle = m
+    .replace(/^(?:please\s+)?remind\s+(?:me\s+)?/i, "")
+    .replace(/(?:in|after)\s+\d+\s*(?:sec(?:ond)?s?|min(?:ute)?s?|hour|hr|s|m)s?\b/gi, "")
+    .replace(/(?:tomorrow(?:\s+morning|\s+afternoon|\s+evening)?|today|tonight)\b/gi, "")
+    .replace(/(?:at\s+)?\d{1,2}(?::\d{2})?\s*(?:[ap]m)?\b/gi, "")
+    .replace(/^\s*(?:to|that|about|for)\s+/i, "")
+    .replace(/^[\s\-_:–—]+|[\s\-_:–—]+$/g, "")
+    .trim();
+
+  if (!cleanTitle || cleanTitle.length < 2) {
+    cleanTitle = "Scheduled Reminder";
+  } else {
+    cleanTitle = cleanTitle.charAt(0).toUpperCase() + cleanTitle.slice(1);
+  }
+
+  const r = await execTool(
+    "task.create",
+    { title: `Reminder: ${cleanTitle}`, deadline, priority: "high", source: "User" },
+    { runId }
+  );
+
+  const formattedTime = isRelative && durationSeconds < 60
+    ? `${durationSeconds} second${durationSeconds === 1 ? "" : "s"}`
+    : isRelative && durationSeconds < 3600
+    ? `${Math.round(durationSeconds / 60)} minute${Math.round(durationSeconds / 60) === 1 ? "" : "s"}`
+    : `${fmtDay(deadline)} at ${fmtTime(deadline)}`;
+
+  const createdTask = r.data as (typeof tasks.$inferSelect);
+
   return {
-    text: r.ok
-      ? `Done — I'll remind you ${off === 0 ? "today" : "tomorrow"} at ${fmtTime(deadline)}: “${title}”. It's a task, so it will also surface in your daily briefing.`
-      : `The reminder could not be created: ${r.summary}`,
-    blocks: r.ok ? [{ type: "tasks", items: taskBlock([r.data as (typeof tasks.$inferSelect)]) }] : [],
+    text: `⏰ **Reminder Scheduled!** I will alert you in **${formattedTime}** to **"${cleanTitle}"**.\n\nA live timer has been started with an audible alert chime and notification when it's due.`,
+    blocks: [
+      {
+        type: "result",
+        title: "⏰ Active System Reminder & Alarm",
+        lines: [
+          `Reminder: ${cleanTitle}`,
+          `Due in: ${formattedTime}`,
+          `Target Time: ${deadline.toLocaleTimeString("en-IN")}`,
+          `Alert Type: Audio Chime + System Desktop Notification`,
+        ],
+        action: {
+          type: "reminder_alert",
+          payload: {
+            title: cleanTitle,
+            targetTime: deadline.toISOString(),
+            durationSeconds,
+            taskId: createdTask?.id,
+          },
+        },
+      },
+      ...(r.ok ? [{ type: "tasks" as const, items: taskBlock([createdTask]) }] : []),
+    ],
   };
 }
 
@@ -2106,9 +2292,8 @@ const ROUTES: { re: RegExp; run: (m: string, ctx: Ctx) => Promise<ChatContent> }
   { re: /(event|meeting|appointment).{0,45}(tomorrow|today|tonight)|add (it\b|the event|an? (event|meeting))/i, run: hCalendarEvent },
   { re: /(?:what'?s (?:my )?next(?: action)?|next action|what should i do next|what do i do next)\b/i, run: hNextAction },
   { re: /(important (today|now|emails)|what'?s important|catch me up|briefing|take care of|what should i (do|take)|what'?s (up|on) (today|now)|priorit)/i, run: hBriefing },
-  { re: /^(yes|yeah|yep|sure|go ahead|do it|ok|okay|please do)\b/i, run: hAffirm },
-  { re: /(?:add|put|create|save|set)\s+.{0,40}(?:to\s+(?:the\s+|my\s+)?tasks?|in\s+(?:my\s+)?tasks?)|(?:i\s+want\s+to|i\s+need\s+to|can\s+you\s+add).{0,50}(?:tasks?|remind)|remind\s+me\s+(?:at|to|today|tomorrow)|(?:set|add|schedule|update)?\s*(?:reminder|deadline|time)\s*(?:for|to|on)\b|keep\s+.{1,30}in\s+inbox/i, run: hSetTaskReminder },
-  { re: /remind/i, run: hRemind },
+  { re: /(?:remind|reminder|alarm|alert\s+me|countdown)/i, run: hRemind },
+  { re: /(?:add|put|create|save|set)\s+.{0,40}(?:to\s+(?:the\s+|my\s+)?tasks?|in\s+(?:my\s+)?tasks?)|(?:i\s+want\s+to|i\s+need\s+to|can\s+you\s+add).{0,50}(?:tasks?)|(?:set|add|schedule|update)?\s*(?:deadline|time)\s*(?:for|to|on)\b|keep\s+.{1,30}in\s+inbox/i, run: hSetTaskReminder },
   { re: /(junk|free up|clean( up)?|storage|disk space)/i, run: hCleanup },
   { re: /₹|payment|transfer|send .*rs\b|\bupi\b/i, run: hPayment },
   {
