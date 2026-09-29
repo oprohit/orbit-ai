@@ -171,8 +171,8 @@ export async function seedDemo() {
   await db.insert(s.mcpServers).values([
     { id: "mcp-1", name: "Google MCP", description: "Official MCP server wrapping Gmail & Calendar. Every tool still passes through the Orbit policy engine.", status: "connected", permissionLevel: "Mixed (READ allow, SEND ask)", health: "healthy", lastUsed: ago(0, 8, 30) },
     { id: "mcp-2", name: "Filesystem MCP", description: "Local file operations via the Desktop Agent allowlist. Destructive ops are CRITICAL.", status: "connected", permissionLevel: "READ allow, WRITE ask, DELETE ask+confirm", health: "healthy", lastUsed: ago(1) },
-    { id: "mcp-3", name: "GitHub MCP", description: "Repo, issue and PR tools for the GitHub connector.", status: "disconnected", permissionLevel: "READ allow", health: "—", lastUsed: null },
-    { id: "mcp-4", name: "Chrome DevTools MCP", description: "Browser automation primitives (navigate, screenshot, query). Not enabled by default.", status: "degraded", permissionLevel: "ASK for all", health: "unstable", lastUsed: ago(9) },
+    { id: "mcp-3", name: "GitHub MCP", description: "Repo, issue and PR tools for the GitHub connector.", status: "connected", permissionLevel: "READ allow", health: "healthy", lastUsed: ago(2) },
+    { id: "mcp-4", name: "Chrome DevTools MCP", description: "Browser automation primitives (navigate, screenshot, query).", status: "connected", permissionLevel: "ASK for destructive", health: "healthy", lastUsed: ago(1) },
   ]);
   await db.insert(s.mcpTools).values([
     { id: "mcp-t1", serverId: "mcp-1", name: "gmail.search", description: "Search messages", riskLevel: "low", permission: "allow" },

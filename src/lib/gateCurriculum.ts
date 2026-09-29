@@ -107,6 +107,7 @@ export const GATE_CATEGORIES: SubtaskCategory[] = [
 ];
 
 export const GATE_100_SUBTASKS: CuratedSubtask[] = [
+
   // ── 1. OPERATING SYSTEMS (12 Subtasks) ──────────────────────────
   {
     id: "gate-os-1",
@@ -1777,3 +1778,5 @@ export const GATE_100_SUBTASKS: CuratedSubtask[] = [
     },
   },
 ];
+
+export const GATE_SUBTASKS = GATE_100_SUBTASKS;

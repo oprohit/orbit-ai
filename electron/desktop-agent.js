@@ -305,11 +305,37 @@ function startDesktopAgent() {
     if (url.pathname === "/play" && req.method === "POST") {
       let body = "";
       req.on("data", (chunk) => (body += chunk));
-      req.on("end", () => {
+      req.on("end", async () => {
         try {
           const parsed = body ? JSON.parse(body) : {};
-          const song = parsed.song || "music";
-          const targetUrl = parsed.url || `https://www.youtube.com/results?search_query=${encodeURIComponent(song)}`;
+          const song = parsed.song || "relaxing music";
+          let targetUrl = parsed.url;
+
+          // If no direct watch URL, scrape top YouTube videoId to play automatically
+          if (!targetUrl || !targetUrl.includes("watch?v=")) {
+            try {
+              const ytRes = await fetch(
+                `https://www.youtube.com/results?search_query=${encodeURIComponent(song)}`,
+                { headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" } }
+              );
+              if (ytRes.ok) {
+                const html = await ytRes.text();
+                const m = html.match(/videoId.:.([a-zA-Z0-9_-]{11})/);
+                if (m && m[1]) {
+                  targetUrl = `https://www.youtube.com/watch?v=${m[1]}&autoplay=1`;
+                }
+              }
+            } catch (err) {
+              console.warn("YouTube search scrape error:", err.message);
+            }
+          }
+
+          if (!targetUrl) {
+            targetUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(song)}`;
+          } else if (!targetUrl.includes("autoplay=1") && targetUrl.includes("watch?v=")) {
+            targetUrl += "&autoplay=1";
+          }
+
           exec(`start "" "${targetUrl}"`);
           res.writeHead(200, { "Content-Type": "application/json" });
           res.end(
@@ -317,7 +343,7 @@ function startDesktopAgent() {
               ok: true,
               song,
               url: targetUrl,
-              summary: `Playing "${song}" on default browser`,
+              summary: `Directly playing "${song}" on default browser`,
             })
           );
         } catch (e) {

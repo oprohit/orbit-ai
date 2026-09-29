@@ -372,13 +372,26 @@ function BlockView({ b, approvals, onDecide, busy, onSend }: { b: Block; approva
                 Target: <span className="text-ink font-medium">{b.goal}</span> · Recommended Timeline: <span className="text-accent font-medium">{b.timeline}</span>
               </div>
             </div>
-            <button
-              type="button"
-              onClick={() => onSend(`create a goal to prepare for ${b.goal}`)}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-accent/40 bg-accent px-3 py-1.5 text-[11.5px] font-medium text-white shadow-sm transition hover:brightness-110 glow-accent"
-            >
-              <Icon name="goals" size={12} /> Add as active goal in Orbit
-            </button>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  if (typeof window !== "undefined") {
+                    window.dispatchEvent(new CustomEvent("orbit:open-task-breaker", { detail: { goal: b.goal } }));
+                  }
+                }}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-accent/60 bg-accent/20 px-3 py-1.5 text-[11.5px] font-semibold text-accent shadow-sm transition hover:bg-accent hover:text-black"
+              >
+                <span>🎯</span> Open Task Breaker Flowchart (110 Steps)
+              </button>
+              <button
+                type="button"
+                onClick={() => onSend(`create a goal to prepare for ${b.goal}`)}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-surface px-3 py-1.5 text-[11.5px] font-medium text-ink shadow-sm transition hover:bg-white/5"
+              >
+                <Icon name="goals" size={12} /> Add as active goal
+              </button>
+            </div>
           </div>
 
           <div>
@@ -591,6 +604,11 @@ export default function Chat({ initialMessages }: { initialMessages: Msg[] }) {
         // Client-side Desktop Agent Bridge execution
         const blocks = data.assistant.content?.blocks || [];
         for (const blk of blocks) {
+          if (blk.type === "study_plan" || (blk.type === "result" && blk.action?.type === "open_task_breaker")) {
+            if (typeof window !== "undefined") {
+              window.dispatchEvent(new CustomEvent("orbit:open-task-breaker"));
+            }
+          }
           if (blk.type === "result" && blk.action) {
             if (blk.action.type === "mkdir") {
               fetch("http://127.0.0.1:38291/mkdir", {
@@ -603,17 +621,23 @@ export default function Chat({ initialMessages }: { initialMessages: Msg[] }) {
                 }),
               }).catch(() => {});
             } else if (blk.action.type === "music") {
-              if (blk.action.payload?.url) {
-                window.open(blk.action.payload.url, "_blank");
-              }
+              const playUrl = blk.action.payload?.url;
+              let openedLocally = false;
               fetch("http://127.0.0.1:38291/play", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                   song: blk.action.payload?.song,
-                  url: blk.action.payload?.url,
+                  url: playUrl,
                 }),
-              }).catch(() => {});
+              })
+                .then((r) => {
+                  if (r.ok) openedLocally = true;
+                  else if (playUrl && !openedLocally) window.open(playUrl, "_blank");
+                })
+                .catch(() => {
+                  if (playUrl && !openedLocally) window.open(playUrl, "_blank");
+                });
             } else if (blk.action.type === "mail") {
               // Never pop up compose draft if sent is true or direct send
               if (blk.action.payload?.openCompose && !blk.action.payload?.sent) {

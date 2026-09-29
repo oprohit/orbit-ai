@@ -878,29 +878,146 @@ async function hAutomationManage(m: string, { runId }: Ctx): Promise<ChatContent
 async function hEmailTriage(_m: string, { runId }: Ctx): Promise<ChatContent> {
   const res = await execTool("gmail.classify", {}, { runId, reason: "You asked for an email triage" });
   const rows = (res.data as (typeof emailItems.$inferSelect)[]) ?? [];
-  const important = rows.filter((e) => e.classification === "critical" || e.classification === "important").slice(0, 5);
-  const fbEmail = rows.find((e) => /feedback form/i.test(e.subject) && !e.read);
+  const important = rows.filter((e) => e.classification === "critical" || e.classification === "important");
+  
+  // Query all current tasks from DB to check what was ALREADY completed or is open
+  const existingTasks = await db.select().from(tasks);
 
-  let fbTask: (typeof tasks.$inferSelect) | null = null;
-  if (fbEmail) {
-    const existing = await db.select().from(tasks).where(like(tasks.title, "%Feedback%"));
-    if (!existing.length) {
-      const r = await execTool("task.create", {
-        title: "Fill Teacher Feedback Form",
-        description: "Source: Gmail → Kalaivana — “All students must complete the Teacher Feedback Form by Friday.”",
-        priority: "high",
-        deadline: nextFriday(),
-        source: "Gmail → Kalaivana",
-      }, { runId });
-      if (r.ok) fbTask = r.data as (typeof tasks.$inferSelect);
+  // Defined actionable emails with expected tasks
+  const potentialActions = [
+    {
+      sourceMatch: "Kalaivana",
+      titleKeywords: ["feedback"],
+      defaultTitle: "Fill Teacher Feedback Form",
+      description: "Source: Gmail → Kalaivana — “All students must complete the Teacher Feedback Form by Friday.”",
+      priority: "high" as const,
+      deadline: nextFriday(),
+      source: "Gmail → Kalaivana",
+    },
+    {
+      sourceMatch: "placements@college.edu",
+      titleKeywords: ["tcs", "nqt", "placement"],
+      defaultTitle: "Register for TCS NQT placement",
+      description: "Source: Gmail → Placement Cell — “Registration closes Friday 6 PM.”",
+      priority: "high" as const,
+      deadline: nextFriday(),
+      source: "Gmail → Placement Cell",
+    },
+    {
+      sourceMatch: "examcell@college.edu",
+      titleKeywords: ["internal assessment", "ds"],
+      defaultTitle: "Submit DS Internal Assessment",
+      description: "Source: Gmail → Exam Cell — “Submission window open until Friday 11:59 PM.”",
+      priority: "urgent" as const,
+      deadline: at(1, 23, 59),
+      source: "Gmail → Exam Cell",
+    },
+    {
+      sourceMatch: "scholarships@college.edu",
+      titleKeywords: ["scholarship", "nsp"],
+      defaultTitle: "Apply for NSP National Scholarship",
+      description: "Source: Gmail → National Scholarship Portal — Applications open for eligible students.",
+      priority: "medium" as const,
+      deadline: at(9, 18, 0),
+      source: "Gmail → Scholarships",
+    },
+  ];
+
+  const completedEmailTasks: { title: string; source: string }[] = [];
+  const pendingEmailTasks: (typeof tasks.$inferSelect)[] = [];
+  const newlyCreatedTasks: (typeof tasks.$inferSelect)[] = [];
+
+  for (const act of potentialActions) {
+    const matchedTask = existingTasks.find((t) =>
+      act.titleKeywords.some((kw) => t.title.toLowerCase().includes(kw)) ||
+      (t.source && t.source.toLowerCase().includes(act.sourceMatch.toLowerCase()))
+    );
+
+    if (matchedTask) {
+      if (matchedTask.status === "completed") {
+        // User finished this task: Remember it and NEVER show it as a pending action again!
+        completedEmailTasks.push({ title: matchedTask.title, source: matchedTask.source || act.source });
+      } else {
+        pendingEmailTasks.push(matchedTask);
+      }
+    } else {
+      // Not yet created: extract it as a task
+      const createRes = await execTool("task.create", {
+        title: act.defaultTitle,
+        description: act.description,
+        priority: act.priority,
+        deadline: act.deadline,
+        source: act.source,
+      }, { runId, reason: `Auto-extracted task from ${act.source}` });
+
+      if (createRes.ok && createRes.data) {
+        newlyCreatedTasks.push(createRes.data as (typeof tasks.$inferSelect));
+      }
     }
   }
+
+  // Check unread & critical emails
+  const unreadCritical = rows.filter((e) => !e.read && (e.classification === "critical" || e.classification === "important"));
+  const unreadCount = rows.filter((e) => !e.read).length;
+
+  let reportText = `📧 **Inbox Triage & Email Analysis**\n\nI scanned your ${rows.length} recent messages (${unreadCount} unread, ${important.length} high priority):\n\n`;
+
+  if (newlyCreatedTasks.length > 0) {
+    reportText += `📌 **${newlyCreatedTasks.length} New Actionable Task${newlyCreatedTasks.length > 1 ? "s" : ""} Extracted:**\n`;
+    newlyCreatedTasks.forEach((t) => {
+      reportText += `• **${t.title}** (from ${t.source}) — Added to your Tasks board.\n`;
+    });
+    reportText += "\n";
+  }
+
+  if (pendingEmailTasks.length > 0) {
+    reportText += `⏳ **${pendingEmailTasks.length} Pending Task${pendingEmailTasks.length > 1 ? "s" : ""} Tracked:**\n`;
+    pendingEmailTasks.forEach((t) => {
+      reportText += `• **${t.title}** — Due ${t.deadline ? fmtDay(new Date(t.deadline)) : "soon"} (${t.status}).\n`;
+    });
+    reportText += "\n";
+  }
+
+  if (completedEmailTasks.length > 0) {
+    reportText += `✓ **Orbit Memory Audit (${completedEmailTasks.length} Completed):**\n`;
+    completedEmailTasks.forEach((t) => {
+      reportText += `• *${t.title}* was marked done earlier. As requested, it will never be prompted or re-added.\n`;
+    });
+    reportText += "\n";
+  }
+
+  if (unreadCritical.length > 0) {
+    reportText += `⚠️ **Upcoming Deadlines / Attention Required:**\n`;
+    unreadCritical.slice(0, 3).forEach((e) => {
+      reportText += `• **${e.from}**: "${e.subject}" ${e.deadline ? `(Due ${e.deadline})` : ""}\n`;
+    });
+  } else {
+    reportText += `🎉 No missed emails or urgent unhandled deadlines. Newsletters and promotional mail suppressed.`;
+  }
+
+  const activeDisplayTasks = [...newlyCreatedTasks, ...pendingEmailTasks];
+
   return {
-    text: `Triage complete: ${important.length} important messages surfaced, newsletters and promotions suppressed. ${fbTask ? "I also extracted a task — Fill Teacher Feedback Form, due Friday, straight from the Kalaivana email." : "No new tasks to extract this time."}`,
+    text: reportText.trim(),
     blocks: [
-      { type: "emails", items: important.map((e) => ({ from: e.from ?? "", subject: e.subject, cls: e.classification ?? "routine", deadline: e.deadline ?? undefined })) },
-      ...(fbTask ? [{ type: "tasks" as const, items: taskBlock([fbTask]) }] : []),
-      { type: "chips", chips: [{ label: "Find time for the feedback form", send: "Find me time in my calendar to complete the feedback form" }] },
+      {
+        type: "emails",
+        items: important.slice(0, 6).map((e) => ({
+          from: e.from ?? "",
+          subject: e.subject,
+          cls: e.classification ?? "routine",
+          deadline: e.deadline ?? undefined,
+        })),
+      },
+      ...(activeDisplayTasks.length > 0 ? [{ type: "tasks" as const, items: taskBlock(activeDisplayTasks.slice(0, 4)) }] : []),
+      {
+        type: "chips",
+        chips: [
+          { label: "Show my full task list", send: "Show me my tasks" },
+          { label: "Find time in calendar", send: "Find me free time in my calendar to complete tasks" },
+          { label: "What's important today?", send: "What's important today?" },
+        ],
+      },
     ],
   };
 }
@@ -1051,13 +1168,32 @@ async function hExpense(_m: string, { runId }: Ctx): Promise<ChatContent> {
   };
 }
 
-function parseTaskAndDeadline(m: string): { title: string; deadline: Date | null; hasTime: boolean } {
-  let text = m
-    .replace(/^(?:please\s+)?(?:add|create|make|new|schedule|put|remind\s+me(?:\s+to)?)\s+(?:a\s+)?(?:task|to-?do|reminder|item)?(?:\s+(?:to|for|about|:|that)\s+|\s+)/i, "")
+function cleanTaskTitle(raw: string, matchedTimeStr?: string): string {
+  let t = raw;
+  if (matchedTimeStr) {
+    t = t.replace(matchedTimeStr, " ");
+  }
+  t = t
+    .replace(/^(?:i\s+(?:want|need|have)\s+to|can\s+you(?:\s+please)?|please|could\s+you)\s+/i, " ")
+    .replace(/^(?:set\s+(?:a\s+)?reminder\s+(?:for|to)|schedule\s+(?:a\s+)?reminder\s+(?:for|to))\s+/i, " ")
+    .replace(/\b(?:can\s+you\s+)?(?:add|put|save)\s+(?:this\s+)?(?:to\s+(?:the|my)?\s*(?:tasks?|todo|inbox|list))\s*(?:and)?\s*/gi, " ")
+    .replace(/\b(?:to\s+(?:the|my)?\s*(?:tasks?|todo|inbox|list))\b/gi, " ")
+    .replace(/^(?:add|create|make|new|schedule|put|remind\s+me(?:\s+to)?)\s+(?:a\s+)?(?:task|to-?do|reminder|item)?(?:\s+(?:to|for|about|:|that)\s+|\s+)?/i, " ")
+    .replace(/^(?:add|create|make|new|schedule|put)\s+/i, " ")
+    .replace(/\b(?:and\s+)?remind\s+me(?:\s+at\s+[\d:apm\s]+|\s+to)?\b/gi, " ")
+    .replace(/\b(?:today|tomorrow|tonight)\b/gi, " ")
+    .replace(/\b(?:by|on|next)\s+(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/gi, " ")
+    .replace(/\b(?:at|by|for)?\s*\d{1,2}(?::\d{2})?\s*(?:am|pm)\b/gi, " ")
+    .replace(/\s+(?:at|by|on|for|due)\s*$/gi, "")
+    .replace(/^[?,.:;\s]+|[?,.:;\s]+$/g, "")
+    .replace(/\s{2,}/g, " ")
     .trim();
 
-  if (!text) text = m.trim();
+  if (!t) t = "New task";
+  return t.charAt(0).toUpperCase() + t.slice(1);
+}
 
+function parseTaskAndDeadline(m: string): { title: string; deadline: Date | null; hasTime: boolean } {
   let deadline: Date | null = null;
   let hasTime = false;
 
@@ -1088,7 +1224,7 @@ function parseTaskAndDeadline(m: string): { title: string; deadline: Date | null
   let minute = 0;
 
   for (const re of timeRegexes) {
-    const match = text.match(re);
+    const match = m.match(re);
     if (match) {
       matchedTimeStr = match[0];
       hasTime = true;
@@ -1117,21 +1253,7 @@ function parseTaskAndDeadline(m: string): { title: string; deadline: Date | null
     deadline = at(dayOffset, hour, minute);
   }
 
-  let cleanTitle = text;
-  if (matchedTimeStr) {
-    cleanTitle = cleanTitle.replace(matchedTimeStr, " ");
-  }
-  cleanTitle = cleanTitle
-    .replace(/\b(?:today|tomorrow|tonight)\b/gi, " ")
-    .replace(/\b(?:by|on|next)\s+(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/gi, " ")
-    .replace(/\s+(?:at|by|on|for|due)\s*$/gi, "")
-    .replace(/^[,\s.:;]+|[,\s.:;]+$/g, "")
-    .replace(/\s{2,}/g, " ")
-    .trim();
-
-  if (!cleanTitle) cleanTitle = "New task";
-  cleanTitle = cleanTitle.charAt(0).toUpperCase() + cleanTitle.slice(1);
-
+  const cleanTitle = cleanTaskTitle(m, matchedTimeStr);
   return { title: cleanTitle, deadline, hasTime };
 }
 
@@ -1144,7 +1266,7 @@ async function hNewTask(m: string, { runId }: Ctx): Promise<ChatContent> {
       source: "User",
       status: "planned",
       deadline,
-    }, { runId });
+    }, { runId, reason: "User created scheduled task" });
     const when = `${fmtDay(deadline)} at ${fmtTime(deadline)}`;
     return {
       text: r.ok
@@ -1160,7 +1282,7 @@ async function hNewTask(m: string, { runId }: Ctx): Promise<ChatContent> {
     source: "User",
     status: "inbox",
     deadline: null,
-  }, { runId });
+  }, { runId, reason: "User created inbox task" });
 
   return {
     text: r.ok
@@ -1182,7 +1304,7 @@ async function hNewTask(m: string, { runId }: Ctx): Promise<ChatContent> {
   };
 }
 
-async function hSetTaskReminder(m: string, _ctx: Ctx): Promise<ChatContent> {
+async function hSetTaskReminder(m: string, ctx: Ctx): Promise<ChatContent> {
   if (/no reminder|keep in inbox|without reminder/i.test(m)) {
     return {
       text: "Got it! Kept in your inbox without a reminder. You can schedule it anytime from the Tasks dashboard.",
@@ -1198,31 +1320,46 @@ async function hSetTaskReminder(m: string, _ctx: Ctx): Promise<ChatContent> {
     };
   }
 
-  const recentTasks = await db.select().from(tasks).orderBy(desc(tasks.createdAt)).limit(10);
+  const recentTasks = await db.select().from(tasks).orderBy(desc(tasks.createdAt)).limit(20);
+  
+  // Search for an existing task with meaningful title match
   let target = recentTasks.find((t) =>
-    parsedTaskName.length > 2 && t.title.toLowerCase().includes(parsedTaskName.toLowerCase())
+    parsedTaskName.length > 2 && (
+      t.title.toLowerCase().includes(parsedTaskName.toLowerCase()) ||
+      parsedTaskName.toLowerCase().includes(t.title.toLowerCase())
+    )
   );
+
+  // CRITICAL FIX: If target is not found, DO NOT hijack an arbitrary recent task (e.g. recentTasks[0])!
+  // Instead, create a brand-new task with the requested title and scheduled deadline.
   if (!target) {
-    target = recentTasks.find((t) => t.source === "User" && !t.deadline) || recentTasks.find((t) => t.source === "User") || recentTasks[0];
-  }
-
-  if (target) {
-    await db.update(tasks).set({
-      deadline,
+    const r = await execTool("task.create", {
+      title: parsedTaskName,
+      source: "User",
       status: "planned",
-    }).where(eq(tasks.id, target.id));
+      deadline,
+    }, { runId: ctx.runId, reason: "User scheduled new task with reminder" });
 
-    const updated = { ...target, deadline, status: "planned" };
     const when = `${fmtDay(deadline)} at ${fmtTime(deadline)}`;
     return {
-      text: `Set reminder for **${target.title}** to **${when}**. It's updated on your Tasks dashboard.`,
-      blocks: [{ type: "tasks", items: taskBlock([updated as any]) }],
+      text: r.ok
+        ? `Added **${parsedTaskName}** to your tasks scheduled for **${when}** with reminder active.`
+        : `Couldn't create the task: ${r.summary}`,
+      blocks: r.ok ? [{ type: "tasks", items: taskBlock([r.data as (typeof tasks.$inferSelect)]) }] : [],
     };
   }
 
+  // Update existing target task
+  await db.update(tasks).set({
+    deadline,
+    status: "planned",
+  }).where(eq(tasks.id, target.id));
+
+  const updated = { ...target, deadline, status: "planned" };
+  const when = `${fmtDay(deadline)} at ${fmtTime(deadline)}`;
   return {
-    text: `Scheduled reminder for ${fmtDay(deadline)} at ${fmtTime(deadline)}.`,
-    blocks: [],
+    text: `Set reminder for **${target.title}** to **${when}**. It's updated on your Tasks dashboard.`,
+    blocks: [{ type: "tasks", items: taskBlock([updated as any]) }],
   };
 }
 
@@ -1264,18 +1401,20 @@ async function hFallback(m: string, _ctx: Ctx): Promise<ChatContent> {
 
 async function hPlayMusic(m: string, { runId }: Ctx): Promise<ChatContent> {
   const song = m.replace(/^(?:please\s+)?(?:play|listen to)\s+(?:music|song|track)?\s*["']?/i, "").replace(/["']?\s*$/i, "").trim() || "relaxing music";
-  const ytUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(song)}`;
-  const musicUrl = `https://music.youtube.com/search?q=${encodeURIComponent(song)}`;
-  const spotifyUrl = `https://open.spotify.com/search/${encodeURIComponent(song)}`;
+  
+  const execResult = await execTool("media.play", { song }, { runId, reason: `Play music "${song}"` });
+  const playData = (execResult.data as any) || {};
 
-  await execTool("media.play", { song }, { runId, reason: `Play music "${song}"` });
+  const ytUrl = playData.url || `https://www.youtube.com/results?search_query=${encodeURIComponent(song)}`;
+  const musicUrl = playData.musicUrl || `https://music.youtube.com/search?q=${encodeURIComponent(song)}`;
+  const spotifyUrl = playData.spotifyUrl || `https://open.spotify.com/search/${encodeURIComponent(song)}`;
 
   await logAudit({
     action: `media.play — "${song}"`,
     toolId: "media.play",
     runId,
     authorization: "allowed",
-    resultSummary: `Auto-opened default browser to play "${song}"`,
+    resultSummary: `Auto-opened default browser to directly play "${song}"`,
   });
 
   return {
@@ -1286,8 +1425,8 @@ async function hPlayMusic(m: string, { runId }: Ctx): Promise<ChatContent> {
         title: `🎵 Now Playing: ${song}`,
         lines: [
           `Track: ${song}`,
-          `Status: Auto-opened in default browser ✓`,
-          `Provider: YouTube & YouTube Music`,
+          `Status: Direct player launched in browser ✓`,
+          `Provider: YouTube Autoplay & YouTube Music`,
         ],
         action: {
           type: "music",
@@ -1571,7 +1710,7 @@ async function hWhatsApp(_m: string, { runId }: Ctx): Promise<ChatContent> {
 const ROUTES: { re: RegExp; run: (m: string, ctx: Ctx) => Promise<ChatContent> }[] = [
   { re: /(?:setup|link|connect|scan|sync|read|qr)\s*(?:my\s*)?whatsapp|whatsapp\b/i, run: hWhatsApp },
   { re: /^(?:please\s+)?(?:play|listen to)\s+(?:music|song|track)?\s*["']?([^"'\n]+?)["']?$/i, run: hPlayMusic },
-  { re: /(?:prepare for|i want to prepare|how to (?:prepare|study|learn|master)|roadmap for|break down (?:my )?goal|breakdown|study plan for|syllabus for|strategy for)\s+([a-zA-Z0-9\s-]+)/i, run: hBreakGoal },
+  { re: /(?:complex\s+task|task\s+breaker|flowchart|100\s+steps|roadmap\s+for|draw\s+roadmap|break\s+down\s+(?:my\s+|this\s+|a\s+)?(?:complex\s+)?(?:task|goal)|prepare for|i want to prepare|how to (?:prepare|study|learn|master)|breakdown|study plan for|syllabus for|strategy for)\s*([a-zA-Z0-9\s-]*)/i, run: hBreakGoal },
   { re: /(?:automation|automations)\b|(?:change|update|set|reschedule|adjust|switch|turn\s+(?:on|off)|enable|disable|pause)\s+.{0,50}(?:email triage|calendar check|expense report|internship search|approval ping|timing|schedule|cadence)\b|(?:email triage|calendar check|expense report|internship search|approval ping)\s*.{0,50}(?:change|update|set|to\s+\d|at\s+\d|every)\b/i, run: hAutomationManage },
   { re: /register(ation)?|codespark/i, run: hRegister },
   { re: /(search|find|look).{0,35}(opportunit|hackathon|workshop|event for)|opportunities?( for| that)?/i, run: hOppsSearch },
@@ -1584,7 +1723,7 @@ const ROUTES: { re: RegExp; run: (m: string, ctx: Ctx) => Promise<ChatContent> }
   { re: /(?:what'?s (?:my )?next(?: action)?|next action|what should i do next|what do i do next)\b/i, run: hNextAction },
   { re: /(important (today|now|emails)|what'?s important|catch me up|briefing|take care of|what should i (do|take)|what'?s (up|on) (today|now)|priorit)/i, run: hBriefing },
   { re: /^(yes|yeah|yep|sure|go ahead|do it|ok|okay|please do)\b/i, run: hAffirm },
-  { re: /(?:set|add|schedule|update)?\s*(?:reminder|deadline|time)\s*(?:for|to|on)\b|(?:remind\s+me\s+(?:at|today|tomorrow|in)|keep\s+.{1,30}in\s+inbox)/i, run: hSetTaskReminder },
+  { re: /(?:add|put|create|save|set)\s+.{0,40}(?:to\s+(?:the\s+|my\s+)?tasks?|in\s+(?:my\s+)?tasks?)|(?:i\s+want\s+to|i\s+need\s+to|can\s+you\s+add).{0,50}(?:tasks?|remind)|remind\s+me\s+(?:at|to|today|tomorrow)|(?:set|add|schedule|update)?\s*(?:reminder|deadline|time)\s*(?:for|to|on)\b|keep\s+.{1,30}in\s+inbox/i, run: hSetTaskReminder },
   { re: /remind/i, run: hRemind },
   { re: /(junk|free up|clean( up)?|storage|disk space)/i, run: hCleanup },
   { re: /₹|payment|transfer|send .*rs\b|\bupi\b/i, run: hPayment },

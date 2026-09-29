@@ -6,6 +6,7 @@ import { approvals, notifications, profiles } from "@/db/schema";
 import "./globals.css";
 import Sidebar from "@/components/Sidebar";
 import MobileNav from "@/components/MobileNav";
+import TaskBreakerModal from "@/components/TaskBreakerModal";
 
 const display = Space_Grotesk({ subsets: ["latin"], variable: "--font-display" });
 const body = Instrument_Sans({ subsets: ["latin"], variable: "--font-body" });
@@ -35,6 +36,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           <main className="mx-auto w-full max-w-[1280px] px-4 pb-24 pt-5 md:px-8 md:pb-10 md:pt-7">{children}</main>
         </div>
         <MobileNav />
+        <TaskBreakerModal />
       </body>
     </html>
   );

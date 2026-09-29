@@ -25,7 +25,7 @@ export const nextFriday = () => {
   return t;
 };
 
-type Ctx = { runId?: string | null; goalId?: string | null; taskId?: string | null };
+export type Ctx = { runId?: string | null; goalId?: string | null; taskId?: string | null; reason?: string | null };
 
 /**
  * Demo tool executor. Every branch here is a *simulated connector* — the code path,
@@ -434,16 +434,31 @@ export async function runTool(toolId: string, params: Record<string, any>, _ctx?
 
     case "media.play": {
       const song = String(params.song || params.query || "music").trim();
-      const ytUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(song)}`;
-      const musicUrl = `https://music.youtube.com/search?q=${encodeURIComponent(song)}`;
+      let ytUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(song)}`;
+      let musicUrl = `https://music.youtube.com/search?q=${encodeURIComponent(song)}`;
       const spotifyUrl = `https://open.spotify.com/search/${encodeURIComponent(song)}`;
+
+      try {
+        const ytRes = await fetch(`https://www.youtube.com/results?search_query=${encodeURIComponent(song)}`, {
+          headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" },
+          signal: AbortSignal.timeout(2500),
+        });
+        if (ytRes.ok) {
+          const html = await ytRes.text();
+          const m = html.match(/videoId.:.([a-zA-Z0-9_-]{11})/);
+          if (m && m[1]) {
+            ytUrl = `https://www.youtube.com/watch?v=${m[1]}&autoplay=1`;
+            musicUrl = `https://music.youtube.com/watch?v=${m[1]}`;
+          }
+        }
+      } catch {}
 
       try {
         await fetch("http://127.0.0.1:38291/play", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ song, url: ytUrl }),
-          signal: AbortSignal.timeout(1500),
+          signal: AbortSignal.timeout(1800),
         });
       } catch {}
 
@@ -631,8 +646,89 @@ export async function runTool(toolId: string, params: Record<string, any>, _ctx?
         data: { role, company, followUp: fmtDay(followUp) },
       };
     }
+
+    /* ── MCP Tool Aliases & Direct Executors ───────────── */
+    case "fs.scan": {
+      return runTool("filesystem.scan", params, _ctx);
+    }
+    case "fs.search": {
+      const q = String(params.query || params.q || "").toLowerCase();
+      const docs = await db.select().from(documents);
+      const matches = docs.filter((d) => d.name.toLowerCase().includes(q) || d.summary?.toLowerCase().includes(q));
+      return {
+        ok: true,
+        summary: `Found ${matches.length} matching file(s) across authorized filesystem scope`,
+        data: matches.map((m) => ({ id: m.id, name: m.name, kind: m.kind, source: m.source, summary: m.summary })),
+      };
+    }
+    case "fs.archive": {
+      return runTool("filesystem.archive", params, _ctx);
+    }
+    case "fs.delete": {
+      return runTool("filesystem.delete", params, _ctx);
+    }
+    case "repo.list": {
+      const repos = [
+        { id: "repo-1", name: "OrbitAI", owner: "oprohit", visibility: "public", stars: 128, branch: "main", openIssues: 2, updatedAt: "Just now", description: "Personal AI assistant with local desktop bridge & MCP hub" },
+        { id: "repo-2", name: "gate-flowchart-tracker", owner: "oprohit", visibility: "private", stars: 14, branch: "main", openIssues: 0, updatedAt: "Today", description: "110-step GATE Computer Science & Engineering preparation roadmap" },
+        { id: "repo-3", name: "bus-arrival-estimator", owner: "oprohit", visibility: "public", stars: 45, branch: "master", openIssues: 1, updatedAt: "3 days ago", description: "Real-time municipal bus tracking & crowd predictions" },
+      ];
+      return {
+        ok: true,
+        summary: `Retrieved ${repos.length} synchronized repositories from GitHub MCP`,
+        data: repos,
+      };
+    }
+    case "issue.list": {
+      const issues = [
+        { id: "iss-1", repo: "OrbitAI", number: 12, title: "Add WhatsApp Web multi-device QR connector", state: "closed", author: "oprohit", labels: ["enhancement", "whatsapp"] },
+        { id: "iss-2", repo: "OrbitAI", number: 13, title: "Optimize YouTube videoId direct autoplay resolution", state: "closed", author: "oprohit", labels: ["media", "performance"] },
+        { id: "iss-3", repo: "OrbitAI", number: 14, title: "Task Breaker Studio: 110-step interactive flowchart & dock pill", state: "closed", author: "oprohit", labels: ["roadmap", "ui"] },
+      ];
+      return {
+        ok: true,
+        summary: `Fetched ${issues.length} synchronized GitHub issues`,
+        data: issues,
+      };
+    }
+    case "page.navigate": {
+      const targetUrl = String(params.url || "https://google.com");
+      try {
+        await fetch("http://127.0.0.1:38291/play", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ song: "Browser Navigation", url: targetUrl }),
+          signal: AbortSignal.timeout(1800),
+        });
+      } catch {}
+      return {
+        ok: true,
+        summary: `Navigated browser to ${targetUrl} via Chrome DevTools MCP`,
+        data: { url: targetUrl, title: "Live Page", status: 200, loaded: true },
+      };
+    }
+    case "page.screenshot": {
+      const targetUrl = String(params.url || "https://orbit-ai-drab.vercel.app");
+      return {
+        ok: true,
+        summary: `Captured full-page viewport screenshot for ${targetUrl}`,
+        data: {
+          url: targetUrl,
+          viewport: { width: 1440, height: 900, deviceScaleFactor: 2 },
+          timestamp: new Date().toISOString(),
+          format: "image/png",
+          preview: "https://orbit-ai-drab.vercel.app/og-image.png",
+        },
+      };
+    }
+    case "calendar.list": {
+      return runTool("calendar.read", params, _ctx);
+    }
+
     default:
       return { ok: false, summary: `No executor registered for ${toolId}` };
   }
 }
+
+export const execTool = runTool;
 
