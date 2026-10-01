@@ -37,9 +37,11 @@ export type GoalBreakdown = {
 export function extractGoalTopic(input: string): string {
   let clean = input.trim();
 
-  // Strip prefixes
+  // Strip common prompt prefixes
   clean = clean.replace(/^(?:hey\s+orbit|orbit|can\s+you|please|i\s+want\s+to|i\s+need\s+to|help\s+me|how\s+to)\s+/i, "");
+  clean = clean.replace(/^(?:(?:create|make|set\s+up|give\s+me|generate|break\s+down)\s+)?(?:a\s+|an\s+)?(?:long\s*term\s+)?(?:goal|plan|roadmap|strategy)\s+(?:to\s+|for\s+)?/i, "");
   clean = clean.replace(/^(?:prepare\s+for|study\s+for|break\s+down|give\s+me\s+a\s+plan\s+for|roadmap\s+for|plan\s+for|master|learn|start|crack)\s+/i, "");
+  clean = clean.replace(/^(?:mastering|learning|preparing\s+for|studying)\s+/i, "");
   
   // Strip trailing instructions like "make this as a long term goal", "add to goals", etc.
   clean = clean.replace(/[-–—]?\s*(?:make\s+this\s+(?:as\s+)?(?:a\s+)?(?:long\s*term\s+)?goal|add\s+(?:this\s+)?(?:to\s+)?(?:active\s+)?goals?|track\s+(?:this\s+)?(?:as\s+)?(?:a\s+)?goal|flowchart|in\s+orbit).*$/i, "");
@@ -57,7 +59,8 @@ export function extractGoalTopic(input: string): string {
   if (/devops|cloud|kubernetes|docker|aws/i.test(clean)) return "Cloud & DevOps Engineering";
   if (/stock\s*market|investing|trading|day\s*trading/i.test(clean)) return "Financial Markets & Trading";
 
-  // Capitalize title
+  // Clean remaining "master ...", "prepare for ..." inside
+  clean = clean.replace(/^(?:master|learn|prepare\s+for)\s+/i, "");
   return clean.charAt(0).toUpperCase() + clean.slice(1);
 }
 
