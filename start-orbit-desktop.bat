@@ -1,31 +1,31 @@
 @echo off
-title Orbit AI - Desktop Companion & App Launcher
+title Orbit AI - Standalone Local Desktop Software
 color 0b
 echo ========================================================
-echo       ORBIT AI - LOCAL DESKTOP COMPANION & AGENT
+echo       ORBIT AI - LOCAL DESKTOP SOFTWARE ENGINE
 echo ========================================================
 echo.
-echo Starting Orbit Desktop Agent on port 38291...
-echo This enables physical Windows disk scanning (%%TEMP%%, Downloads),
-echo native folder creation, and WhatsApp QR synchronization.
+echo [1] Starting embedded high-speed UI engine (127.0.0.1:3000)...
+echo [2] Starting native Windows companion agent (127.0.0.1:38291)...
+echo.
+echo 0ms WAN Latency - All tabs, buttons, and navigation run 100%% local!
 echo.
 
 cd /d "%~dp0"
 
 if exist "dist\OrbitAI-win32-x64\OrbitAI.exe" (
-    echo [OK] Found native executable: dist\OrbitAI-win32-x64\OrbitAI.exe
-    echo Launching Orbit AI Desktop Application...
+    echo [OK] Found native standalone executable: dist\OrbitAI-win32-x64\OrbitAI.exe
+    echo Launching Orbit AI Desktop Software...
     start "" "dist\OrbitAI-win32-x64\OrbitAI.exe"
     echo.
-    echo Orbit AI is now running natively and listening at http://127.0.0.1:38291!
-    echo Your web browser (https://orbit-ai-drab.vercel.app) is also now connected
-    echo and can scan your hard drive, clean junk, and create real folders.
+    echo Orbit AI is now running locally on your laptop!
+    echo Tab switching is instantaneous and runs completely offline/locally.
     echo.
-    echo You can keep this window open or minimize it.
-    pause
+    echo You may close this launcher window at any time.
+    timeout /t 5 >nul
     exit /b 0
 )
 
-echo [INFO] Starting companion background agent with Node.js...
-node electron/desktop-agent.js
+echo [INFO] Dist package not found. Launching via local Electron development runner...
+npm run desktop
 pause

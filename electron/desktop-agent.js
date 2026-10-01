@@ -570,6 +570,14 @@ function startDesktopAgent() {
     res.end(JSON.stringify({ error: "Not found" }));
   });
 
+  server.on("error", (err) => {
+    if (err.code === "EADDRINUSE") {
+      console.log(`[Orbit Desktop Agent] Port ${PORT} already in use; reusing existing agent.`);
+    } else {
+      console.error("[Orbit Desktop Agent] Server error:", err);
+    }
+  });
+
   server.listen(PORT, "127.0.0.1", () => {
     console.log(`[Orbit Desktop Agent] Local companion running at http://127.0.0.1:${PORT}`);
   });
