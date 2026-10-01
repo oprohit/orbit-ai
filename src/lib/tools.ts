@@ -591,6 +591,65 @@ export async function runTool(toolId: string, params: Record<string, any>, _ctx?
       };
     }
 
+    /* ── Browser / URL Launch ──────────────────────────── */
+    case "browser.open": {
+      let rawUrl = String(params.url || params.target || "").trim();
+      const title = String(params.title || "").trim();
+
+      const KNOWN_SITES: Record<string, string> = {
+        youtube: "https://www.youtube.com",
+        yt: "https://www.youtube.com",
+        "youtube music": "https://music.youtube.com",
+        "yt music": "https://music.youtube.com",
+        ytm: "https://music.youtube.com",
+        google: "https://www.google.com",
+        gmail: "https://mail.google.com",
+        mail: "https://mail.google.com",
+        github: "https://github.com",
+        leetcode: "https://leetcode.com",
+        chatgpt: "https://chat.openai.com",
+        openai: "https://chat.openai.com",
+        whatsapp: "https://web.whatsapp.com",
+        spotify: "https://open.spotify.com",
+        twitter: "https://x.com",
+        x: "https://x.com",
+        reddit: "https://www.reddit.com",
+        netflix: "https://www.netflix.com",
+        drive: "https://drive.google.com",
+        classroom: "https://classroom.google.com",
+        calendar: "https://calendar.google.com",
+      };
+
+      const siteKey = rawUrl.toLowerCase().replace(/^(?:https?:\/\/)?(?:www\.)?/, "").replace(/\.(?:com|org|io|dev|in|net|edu)\b.*$/, "").trim();
+      let targetUrl = KNOWN_SITES[siteKey] || KNOWN_SITES[rawUrl.toLowerCase().trim()];
+
+      if (!targetUrl) {
+        if (/^https?:\/\//i.test(rawUrl)) {
+          targetUrl = rawUrl;
+        } else if (/^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/i.test(rawUrl)) {
+          targetUrl = `https://${rawUrl}`;
+        } else {
+          targetUrl = `https://www.google.com/search?q=${encodeURIComponent(rawUrl)}`;
+        }
+      }
+
+      // Tell local desktop companion agent to open URL via Windows default browser
+      try {
+        await fetch("http://127.0.0.1:38291/open", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url: targetUrl }),
+          signal: AbortSignal.timeout(1800),
+        });
+      } catch {}
+
+      return {
+        ok: true,
+        summary: `Opened ${title || targetUrl} in your default browser`,
+        data: { url: targetUrl, title: title || rawUrl, autoOpened: true },
+      };
+    }
+
     /* ── Desktop Agent (live local companion + fallback) ─────── */
     case "filesystem.scan": {
       try {

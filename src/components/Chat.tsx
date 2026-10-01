@@ -371,6 +371,62 @@ function AutoMusicPlayer({ payload }: { payload: any }) {
   );
 }
 
+function AutoUrlLauncher({ payload }: { payload: any }) {
+  const launchedRef = useRef(false);
+  const targetUrl = payload?.url;
+  const title = payload?.title || "Website";
+
+  const triggerOpen = useCallback((urlToOpen: string) => {
+    if (!urlToOpen) return;
+    // 1. Tell local companion agent to launch browser via Windows OS start command
+    fetch("http://127.0.0.1:38291/open", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url: urlToOpen }),
+    }).catch(() => {});
+
+    // 2. Also open via window.open (Electron shell.openExternal or browser)
+    try {
+      if (typeof window !== "undefined") {
+        window.open(urlToOpen, "_blank", "noopener,noreferrer");
+      }
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    if (launchedRef.current || !targetUrl) return;
+    launchedRef.current = true;
+    triggerOpen(targetUrl);
+  }, [targetUrl, triggerOpen]);
+
+  return (
+    <div className="mt-3 space-y-2.5 border-t border-line/60 pt-2.5">
+      <div className="flex items-center justify-between rounded-xl border border-line bg-surface/80 px-3.5 py-2.5 text-[12px]">
+        <div className="flex items-center gap-2">
+          <span className="relative flex h-2.5 w-2.5">
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+            <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-500" />
+          </span>
+          <span className="font-medium text-ink">{title}</span>
+          <span className="text-[11px] text-muted">· Direct browser launch</span>
+        </div>
+        <span className="rounded bg-emerald-500/15 px-2 py-0.5 text-[10.5px] font-mono text-emerald-400">
+          Launched in Browser ✓
+        </span>
+      </div>
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => triggerOpen(targetUrl)}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-accent/40 bg-accent px-3 py-1.5 text-[11.5px] font-medium text-white shadow-sm transition hover:brightness-110 glow-accent"
+        >
+          <Icon name="external" size={13} /> Open {title} Again ↗
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function BlockView({
   b,
   approvals,
@@ -655,6 +711,9 @@ function BlockView({
           )}
           {b.action?.type === "music" && b.action?.payload && (
             <AutoMusicPlayer payload={b.action.payload} />
+          )}
+          {(b.action?.type === "open_url" || b.action?.type === "browser_open") && b.action?.payload && (
+            <AutoUrlLauncher payload={b.action.payload} />
           )}
         </div>
       );

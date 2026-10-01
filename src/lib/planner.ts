@@ -10,6 +10,7 @@ import { at, fmtDay, fmtTime, nextFriday, runTool } from "./tools";
 import { logAudit } from "./audit";
 import type { Block, ChatContent } from "./types";
 import { generateGoalBreakdown } from "./goalBreakerEngine";
+import { decideAssistantTurn } from "./assistantBrain";
 
 type Ctx = { runId: string; clientScan?: any };
 type TaskRow = (typeof tasks.$inferSelect)[];
@@ -1490,13 +1491,62 @@ async function hAdvice(_m: string, { runId }: Ctx): Promise<ChatContent> {
   };
 }
 
-async function hYouTube(m: string, { runId }: Ctx): Promise<ChatContent> {
+async function hOpenUrl(rawUrl: string, title?: string, customReply?: string, ctx: { runId?: string; clientScan?: any } = {}): Promise<ChatContent> {
+  const res = await execTool("browser.open", { url: rawUrl, title }, { runId: ctx.runId });
+  const data = (res.data as any) || {};
+  const targetUrl = data.url || rawUrl;
+  const displayTitle = data.title || title || (rawUrl.includes("youtube") ? "YouTube" : "Website");
+
+  const replyText =
+    customReply ||
+    (displayTitle.toLowerCase().includes("youtube")
+      ? `Opening **${displayTitle}** for you right now, Aarav! Enjoy watching.`
+      : `Opening **${displayTitle}** in your browser right away, Aarav!`);
+
+  return {
+    text: replyText,
+    blocks: [
+      {
+        type: "result",
+        title: `🌐 Opened in Browser: ${displayTitle}`,
+        lines: [
+          `Destination: ${targetUrl}`,
+          `Status: Launched in your default Windows browser ✓`,
+        ],
+        action: {
+          type: "open_url",
+          payload: { url: targetUrl, title: displayTitle },
+        },
+      },
+      {
+        type: "chips",
+        chips: [
+          { label: "What's important today?", send: "What's important today?" },
+          { label: "Play relaxing lofi music", send: "play relaxing lofi music" },
+        ],
+      },
+    ],
+  };
+}
+
+async function hYouTube(m: string, ctx: Ctx): Promise<ChatContent> {
+  const lower = m.toLowerCase().trim();
+
+  // If user says "open youtube", "launch youtube", "go to youtube", or wants to open it
+  if (
+    /^(?:please\s+|can\s+you\s+|could\s+you\s+|just\s+)?(?:open|launch|go\s+to|start)?\s*(?:the\s+)?(?:youtube|yt)\s*(?:for\s+me|pls|please)?$/i.test(lower) ||
+    /\bopen\s+(?:the\s+)?(?:youtube|yt)\b/i.test(lower) ||
+    /just\s+open\s+youtube/i.test(lower)
+  ) {
+    return hOpenUrl("https://www.youtube.com", "YouTube", "Opening YouTube for you now, Aarav! Enjoy.", ctx);
+  }
+
   const q = m
     .replace(/find me (a |an )?(about|of)?/i, "")
     .replace(/explanation of|video about|tutorial on|study materials? (?:for|about)?|sources? to study|videos? (?:for|about)?|how (?:to|do i) master|master\s+/gi, "")
     .trim();
   const topic = q || "Data Structures and Algorithms";
-  const res = await execTool("youtube.search", { query: topic }, { runId });
+  const res = await execTool("youtube.search", { query: topic }, { runId: ctx.runId });
   const vids = (res.data as any[]) ?? [];
   const searchUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(topic + " full course tutorial")}`;
 
@@ -1869,7 +1919,36 @@ async function hPlayMusic(m: string, { runId }: Ctx): Promise<ChatContent> {
   };
 }
 
-async function hBreakGoal(m: string, { runId }: Ctx): Promise<ChatContent> {
+async function hBreakGoal(m: string, ctx: Ctx): Promise<ChatContent> {
+  const runId = ctx.runId;
+  const lower = m.toLowerCase().trim();
+
+  // 1. Explicit Negation check
+  const hasGoalNegation = /(?:don'?t\s+want|do\s+not\s+want|dotnt\s+want|no\s+goals?|not\s+(?:a\s+)?goal|stop\s+goals?|never\s+mind\s+goals?)\b/i.test(lower);
+  if (hasGoalNegation) {
+    if (/(?:open|launch|go\s+to|start)\s+(?:up\s+)?(?:the\s+)?(?:youtube|yt)\b/i.test(lower) || /youtube/i.test(lower)) {
+      return hOpenUrl("https://www.youtube.com", "YouTube", "Got it, no goals right now Aarav! 🎬 Opening YouTube for you so you can kick back and relax.", ctx);
+    }
+    return {
+      text: "Understood, Aarav — no goals right now! I'm here whenever you need anything else.",
+      blocks: [
+        {
+          type: "chips",
+          chips: [
+            { label: "Open YouTube", send: "open youtube" },
+            { label: "Play relaxing lofi music", send: "play relaxing lofi music" },
+            { label: "What's important today?", send: "What's important today?" },
+          ],
+        },
+      ],
+    };
+  }
+
+  // 2. Direct browser opening check
+  if (/^(?:please\s+|can\s+you\s+|could\s+you\s+|just\s+)?(?:open|launch|go\s+to|start)\s+(?:up\s+)?(?:the\s+)?(?:youtube|yt)\b/i.test(lower)) {
+    return hOpenUrl("https://www.youtube.com", "YouTube", "Opening YouTube for you now, Aarav! Enjoy.", ctx);
+  }
+
   // If the user is just asking to open the task breaker / flowchart view without specifying a goal:
   if (/^(?:open|show|view|launch)?\s*(?:the\s+)?(?:task\s+breaker|flowchart|roadmap)\s*(?:studio|view)?$/i.test(m.trim())) {
     return {
@@ -1898,7 +1977,7 @@ async function hBreakGoal(m: string, { runId }: Ctx): Promise<ChatContent> {
   }));
   const resources = breakdown.resources;
 
-  const wantsGoal = /goal|long.?term|active|make\s+this|save|track|prepare|set\s+up|add\s+as\s+active/i.test(m);
+  const wantsGoal = !hasGoalNegation && /goal|long.?term|active|make\s+this|save|track|prepare|set\s+up|add\s+as\s+active/i.test(m);
   let goalAdded = false;
 
   if (wantsGoal) {
@@ -2060,6 +2139,39 @@ async function hWhatsApp(_m: string, { runId }: Ctx): Promise<ChatContent> {
 /* ────────────────────────── router ────────────────────────── */
 
 const ROUTES: { re: RegExp; run: (m: string, ctx: Ctx) => Promise<ChatContent> }[] = [
+  // 1. Explicit Negation for Goals (e.g. "I don't want to complete any goals rn just open youtube for me")
+  {
+    re: /(?:don'?t\s+want|do\s+not\s+want|dotnt\s+want|no\s+goals?|not\s+(?:a\s+)?goal|stop\s+goals?|never\s+mind\s+goals?)\b/i,
+    run: async (m, ctx) => {
+      const lower = m.toLowerCase();
+      if (/(?:open|launch|go\s+to|start)\s+(?:up\s+)?(?:the\s+)?(?:youtube|yt)\b/i.test(lower) || /youtube/i.test(lower)) {
+        return hOpenUrl("https://www.youtube.com", "YouTube", "Got it, no goals right now Aarav! 🎬 Opening YouTube for you so you can kick back and relax.", ctx);
+      }
+      return {
+        text: "Understood, Aarav — no goals right now! I'm here if you need anything else.",
+        blocks: [
+          {
+            type: "chips",
+            chips: [
+              { label: "Open YouTube", send: "open youtube" },
+              { label: "Play relaxing lofi music", send: "play relaxing lofi music" },
+              { label: "What's important today?", send: "What's important today?" },
+            ],
+          },
+        ],
+      };
+    },
+  },
+
+  // 2. Direct Web / App Launch (e.g. "open youtube", "open gmail", "open leetcode", "open github")
+  {
+    re: /^(?:please\s+|can\s+you\s+|could\s+you\s+|just\s+)?(?:open|launch|go\s+to|visit)\s+(?:up\s+)?(?:the\s+)?(https?:\/\/[^\s]+|www\.[^\s]+|[a-z0-9-]+\.[a-z]{2,}|youtube|yt|youtube\s*music|yt\s*music|gmail|mail|github|leetcode|google|chatgpt|spotify|whatsapp|netflix|twitter|x|reddit|drive|classroom|calendar)\b/i,
+    run: async (m, ctx) => {
+      const match = m.match(/(?:open|launch|go\s+to|visit)\s+(?:up\s+)?(?:the\s+)?([a-z0-9.:/-]+(?:\s+(?:music))?)/i);
+      const target = match ? match[1].trim() : "https://www.youtube.com";
+      return hOpenUrl(target, target, undefined, ctx);
+    },
+  },
   { re: /(?:setup|link|connect|scan|sync|read|qr)\s*(?:my\s*)?whatsapp|whatsapp\b/i, run: hWhatsApp },
   { re: /^(?:please\s+|can\s+you\s+|could\s+you\s+)?(?:open\s+(?:youtube\s*music|yt\s*music|spotify)\s+(?:and\s+)?(?:play|stream|listen\s+to)?\s*["']?([^"'\n]*?)["']?)|^(?:please\s+|can\s+you\s+|could\s+you\s+)?(?:play|listen to|stream|put on)\s+(?:music|song|track)?\s*["']?([^"'\n]+?)["']?$/i, run: hPlayMusic },
   { re: /(?:goal|goals|long.?term\s+goal|make\s+this\s+(?:as\s+)?(?:an?\s+)?(?:active\s+|long.?term\s+)?goal|create\s+(?:a\s+|an\s+)?(?:active\s+)?goal|add\s+(?:this\s+)?(?:as\s+)?(?:an?\s+)?(?:active\s+|actiev\s+)?goal|add\s+as\s+active\s+goal|help me (?:complete|prepare|finish|achieve|get|plan|make).{0,60}goal|prepare\s+for\s+gate|gate\s+prep)/i, run: hGoal },
@@ -2109,6 +2221,35 @@ export async function planTurn(userMessage: string, runId: string, attachment?: 
       resultSummary: `Parsed and indexed attachment "${attachment.name}" (${attachment.type || "file"}, ${Math.round(attachment.size / 1024)} KB)`,
     });
     attachmentPrefix = `📄 **Analyzed Attachment: ${attachment.name}**\n\n`;
+  }
+
+  // 1. LLM-First Cognitive Reasoning Layer (OpenClaw / OpenAI Assistant Architecture)
+  try {
+    const decision = await decideAssistantTurn(m);
+    if (decision) {
+      if (decision.intent === "open_url" && decision.params?.url) {
+        const res = await hOpenUrl(decision.params.url, decision.params.title, decision.reply, { runId, clientScan });
+        if (attachmentPrefix && res.text) res.text = attachmentPrefix + res.text;
+        return res;
+      }
+      if (decision.isNegatedGoal && decision.intent === "conversational") {
+        return {
+          text: decision.reply || "Understood, Aarav — no goals right now! Let me know what you'd like to do instead.",
+          blocks: [
+            {
+              type: "chips",
+              chips: [
+                { label: "Open YouTube", send: "open youtube" },
+                { label: "Play relaxing lofi music", send: "play relaxing lofi music" },
+                { label: "What's important today?", send: "What's important today?" },
+              ],
+            },
+          ],
+        };
+      }
+    }
+  } catch (err) {
+    console.warn("assistantBrain reasoning skipped:", err);
   }
 
   for (const r of ROUTES) {
