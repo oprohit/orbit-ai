@@ -9,6 +9,7 @@ import { generateNaturalEmail, llmReply } from "./ai";
 import { at, fmtDay, fmtTime, nextFriday, runTool } from "./tools";
 import { logAudit } from "./audit";
 import type { Block, ChatContent } from "./types";
+import { generateGoalBreakdown } from "./goalBreakerEngine";
 
 type Ctx = { runId: string; clientScan?: any };
 type TaskRow = (typeof tasks.$inferSelect)[];
@@ -586,106 +587,8 @@ function buildDynamicGoal(m: string): {
   };
 }
 
-async function hGoal(m: string, { runId }: Ctx): Promise<ChatContent> {
-  const tpl = buildDynamicGoal(m);
-
-  const existing = await db.select().from(goals).where(eq(goals.title, tpl.title));
-  const activeExisting = existing.find((g) => g.status === "active");
-  if (activeExisting) {
-    const rows = await db.select().from(tasks).where(eq(tasks.goalId, activeExisting.id)).limit(6);
-    return {
-      text: `Your **${activeExisting.title}** goal is already active on your Goals board: ${activeExisting.currentValue ?? 0}/${activeExisting.targetValue ?? 4} done. Next: ${activeExisting.nextAction ?? "review your tasks"}.`,
-      blocks: [await goalBlock(activeExisting), { type: "tasks", items: taskBlock(rows) }],
-    };
-  }
-
-  const goalId = randomUUID();
-  const deadline = at(tpl.title.includes("GATE") ? 240 : 180, 23, 59);
-
-  await db.insert(goals).values({
-    id: goalId,
-    title: tpl.title,
-    description: tpl.desc,
-    status: "active",
-    deadline,
-    targetValue: tpl.tasks.length,
-    currentValue: 0,
-    unit: "tasks",
-    aiReasoning: `Activated strategic goal from user request “${m}”. Decomposed into ${tpl.ms.length} milestone phases and ${tpl.tasks.length} actionable preparation tasks.`,
-    nextAction: tpl.tasks[0].title,
-    sources: ["User Goal"],
-  });
-
-  for (const [i, [title, detail]] of tpl.ms.entries()) {
-    await db.insert(goalMilestones).values({
-      id: randomUUID(),
-      goalId,
-      title,
-      detail,
-      seq: i,
-      status: i === 0 ? "in_progress" : "pending",
-    });
-  }
-
-  const created: (typeof tasks.$inferSelect)[] = [];
-  for (const t of tpl.tasks) {
-    const taskId = randomUUID();
-    const taskDeadline = at(t.days, t.hour);
-    await db.insert(tasks).values({
-      id: taskId,
-      goalId,
-      title: t.title,
-      priority: t.priority,
-      status: "inbox",
-      deadline: taskDeadline,
-      source: "Agent",
-    });
-    created.push({
-      id: taskId,
-      goalId,
-      title: t.title,
-      priority: t.priority,
-      status: "inbox",
-      deadline: taskDeadline,
-      source: "Agent",
-    } as any);
-  }
-
-  await logAudit({
-    action: `goal.created — ${tpl.title}`,
-    runId,
-    goalId,
-    authorization: "allowed",
-    resultSummary: `Active goal created with ${tpl.ms.length} milestones and ${tpl.tasks.length} tasks`,
-  });
-
-  return {
-    text: `🎯 I've added **"${tpl.title}"** as an **Active Goal** in your Orbit dashboard!\n\nDecomposed into ${tpl.ms.length} structured milestone phases with ${tpl.tasks.length} immediate preparation tasks. You can track your progress in real-time under the Goals tab.`,
-    blocks: [
-      {
-        type: "goal",
-        goal: {
-          id: goalId,
-          title: tpl.title,
-          current: 0,
-          target: tpl.tasks.length,
-          unit: "tasks",
-          deadline: fmtDay(deadline),
-          nextAction: tpl.tasks[0].title,
-          milestones: tpl.ms.map((m, i) => ({ title: m[0], status: i === 0 ? "in_progress" : "pending" })),
-        },
-      },
-      { type: "tasks", items: taskBlock(created) },
-      {
-        type: "chips",
-        chips: [
-          { label: "What's my next action?", send: "What's my next action?" },
-          { label: `Open Task Breaker (${tpl.title.split(" ")[0]})`, send: "Open task breaker flowchart" },
-          { label: "What's important today?", send: "What's important today?" },
-        ],
-      },
-    ],
-  };
+async function hGoal(m: string, ctx: Ctx): Promise<ChatContent> {
+  return hBreakGoal(m, ctx);
 }
 
 async function hRemind(m: string, { runId }: Ctx): Promise<ChatContent> {
@@ -1967,166 +1870,42 @@ async function hPlayMusic(m: string, { runId }: Ctx): Promise<ChatContent> {
 }
 
 async function hBreakGoal(m: string, { runId }: Ctx): Promise<ChatContent> {
-  const isGate = /gate|graduate aptitude|engineering exam/i.test(m);
-  const isDsa = /dsa|data structure|leetcode|coding interview|algorithm/i.test(m);
-  const isMl = /machine learning|deep learning|ai|artificial intelligence|data science/i.test(m);
-
-  let goalName = "GATE Preparation";
-  let timeline = "6–8 Months (200+ Study Hours)";
-  let summaryText = "";
-  let phases: { name: string; duration: string; focus: string }[] = [];
-  let subtasks: { id: string; title: string; status: "pending" | "in_progress" | "done"; weight?: string }[] = [];
-  let resources: { title: string; channel: string; duration: string; why: string; url: string }[] = [];
-
-  if (isGate) {
-    goalName = "GATE Computer Science & IT";
-    timeline = "6–9 Months (250+ Hours)";
-    summaryText = "I researched and decomposed your GATE preparation goal. Rather than overwhelming yourself with 10 subjects at once, the proven strategy prioritizes high-weightage subjects: Engineering Mathematics & Aptitude (28 marks) + Core Systems (OS, DBMS, CN, TOC) (45 marks).\n\nBelow is your structured milestone roadmap, actionable subtasks checklist, and curated free YouTube lecture playlists from Gate Smashers, Knowledge Gate, and NPTEL.\n\n*Note:* This plan is provided as research and guidance — it has NOT been added as an active goal in your Orbit database yet. You can click the button below anytime if you want Orbit to track it.";
-    phases = [
-      { name: "Phase 1: High-Weight Foundations", duration: "Months 1–3", focus: "Engineering Mathematics, Discrete Maths, Operating Systems & DBMS" },
-      { name: "Phase 2: Core Engineering & Systems", duration: "Months 4–6", focus: "Theory of Computation, Compiler Design, Computer Networks & Algorithms" },
-      { name: "Phase 3: Topic-wise PYQs & Mock Tests", duration: "Months 7–8", focus: "Solve 2000–2025 GATE PYQs on GateOverflow, full 3-hr mocks with virtual calculator" },
-    ];
-    subtasks = [
-      { id: "g-1", title: "Download official GATE CS syllabus & create topic weightage matrix", status: "pending", weight: "15% Weight" },
-      { id: "g-2", title: "Watch Gate Smashers playlist on Operating Systems (Process, Deadlock, Memory)", status: "pending", weight: "8–10 Marks" },
-      { id: "g-3", title: "Study Discrete Mathematics & Logic with Knowledge Gate (Sanchit Jain)", status: "pending", weight: "7–9 Marks" },
-      { id: "g-4", title: "Master Theory of Computation & Regular Languages with NPTEL / Gate Smashers", status: "pending", weight: "8–10 Marks" },
-      { id: "g-5", title: "Solve last 15 years of GATE Previous Year Questions (PYQs) on GateOverflow", status: "pending", weight: "Crucial" },
-      { id: "g-6", title: "Attempt 5 full-length timed diagnostic mocks on virtual interface", status: "pending", weight: "Final Sprint" },
-    ];
-    resources = [
-      {
-        title: "GATE Operating Systems Complete Playlist",
-        channel: "Gate Smashers",
-        duration: "Full Course",
-        why: "Varun Singla's legendary series covering OS, DBMS, TOC, and CN with exam-oriented shortcuts.",
-        url: "https://www.youtube.com/results?search_query=gate+smashers+operating+system+playlist",
-      },
-      {
-        title: "GATE Discrete Mathematics & Algorithms",
-        channel: "Knowledge Gate",
-        duration: "Full Playlist",
-        why: "Sanchit Jain's step-by-step rigorous breakdown of discrete math, graphs, and algorithm time complexity.",
-        url: "https://www.youtube.com/results?search_query=knowledge+gate+discrete+mathematics",
-      },
-      {
-        title: "NPTEL GATE Engineering Mathematics & Core CS",
-        channel: "NPTEL-NOC IITM",
-        duration: "University Lectures",
-        why: "In-depth standard theoretical lectures taught by IIT professors mapped to official GATE standards.",
-        url: "https://www.youtube.com/results?search_query=nptel+gate+computer+science",
-      },
-      {
-        title: "GateOverflow PYQ Solutions & Practice",
-        channel: "Gate Overflow",
-        duration: "Community Portal",
-        why: "Every single GATE question from 2000–2025 categorized topic-wise with verified explanations.",
-        url: "https://gateoverflow.in",
-      },
-    ];
-  } else if (isDsa) {
-    goalName = "Data Structures & Algorithms Mastery";
-    timeline = "3–4 Months (120+ Hours)";
-    summaryText = "Here is your researched roadmap to master Data Structures & Algorithms. Rather than random LeetCode grinding, follow pattern-based learning: Arrays/Hashing → Two Pointers → Trees/Graphs → Dynamic Programming.";
-    phases = [
-      { name: "Phase 1: Fundamentals & Patterns", duration: "Weeks 1–4", focus: "Time/Space Complexity, Arrays, HashMaps, Two Pointers, Sliding Window" },
-      { name: "Phase 2: Non-Linear Structures", duration: "Weeks 5–9", focus: "Binary Trees, BSTs, Heaps, Graph BFS/DFS, Backtracking" },
-      { name: "Phase 3: Advanced Optimization", duration: "Weeks 10–14", focus: "Dynamic Programming (1D & 2D), Greedy, Trie, Company Mock Interviews" },
-    ];
-    subtasks = [
-      { id: "dsa-1", title: "Complete Striver A2Z Sheet Step 1 to 3 (Basics to Arrays)", status: "pending", weight: "Core" },
-      { id: "dsa-2", title: "Watch Abdul Bari's Algorithms lectures on recursion & divide and conquer", status: "pending", weight: "Concepts" },
-      { id: "dsa-3", title: "Solve Blind 75 / NeetCode 150 Tree & Graph problems", status: "pending", weight: "Interview Prep" },
-      { id: "dsa-4", title: "Master 1D & 2D Dynamic Programming patterns", status: "pending", weight: "Advanced" },
-    ];
-    resources = [
-      {
-        title: "Algorithms & Time Complexity Masterclass",
-        channel: "Abdul Bari",
-        duration: "Full Playlist",
-        why: "The clearest visual explanations of recursion, sorting, and dynamic programming in computer science.",
-        url: "https://www.youtube.com/results?search_query=abdul+bari+algorithms+playlist",
-      },
-      {
-        title: "NeetCode 150 Coding Interview Guide",
-        channel: "NeetCode",
-        duration: "Interactive Playlist",
-        why: "Visual pattern matching and pythonic code walkthroughs for all top interview problems.",
-        url: "https://www.youtube.com/results?search_query=neetcode+150+playlist",
-      },
-    ];
-  } else if (isMl) {
-    goalName = "Machine Learning & AI Engineering";
-    timeline = "4–6 Months (150+ Hours)";
-    summaryText = "Here is your researched ML engineering roadmap. The optimal path builds on Python/Math foundations before moving to Classical ML algorithms, and finally PyTorch Deep Learning & LLMs.";
-    phases = [
-      { name: "Phase 1: Math & Python Foundations", duration: "Month 1", focus: "NumPy, Pandas, Vector Algebra, Probability & Calculus" },
-      { name: "Phase 2: Classical Machine Learning", duration: "Months 2–3", focus: "Linear/Logistic Regression, Decision Trees, Random Forests, XGBoost, Scikit-Learn" },
-      { name: "Phase 3: Deep Learning & Neural Nets", duration: "Months 4–5", focus: "PyTorch, CNNs, Transformers, Fine-Tuning LLMs" },
-    ];
-    subtasks = [
-      { id: "ml-1", title: "Complete Andrew Ng's Machine Learning Specialization", status: "pending", weight: "Foundations" },
-      { id: "ml-2", title: "Watch StatQuest for intuition on regression, PCA, and gradient descent", status: "pending", weight: "Intuition" },
-      { id: "ml-3", title: "Build 3 end-to-end ML projects on Kaggle datasets", status: "pending", weight: "Portfolio" },
-    ];
-    resources = [
-      {
-        title: "Machine Learning Specialization",
-        channel: "DeepLearning.AI (Andrew Ng)",
-        duration: "Complete Series",
-        why: "The gold standard introduction to supervised and unsupervised machine learning algorithms.",
-        url: "https://www.youtube.com/results?search_query=andrew+ng+machine+learning+playlist",
-      },
-      {
-        title: "Machine Learning Concepts Clearly Explained",
-        channel: "StatQuest with Josh Starmer",
-        duration: "Visual Playlist",
-        why: "Fun, step-by-step visual explanations of math and algorithms without overwhelming notation.",
-        url: "https://www.youtube.com/results?search_query=statquest+machine+learning",
-      },
-    ];
-  } else {
-    const raw = m.replace(/^(?:i want to|how to|help me|can you|please)?\s*(?:prepare for|study for|break down|give me a plan for|roadmap for|plan for)\s+/i, "").replace(/[.?]+$/, "").trim();
-    goalName = `${raw || "Goal"} Mastery`;
-    timeline = "3–6 Months";
-    summaryText = `Here is a researched milestone plan and subtasks breakdown for **${raw}**. I have broken this into 3 progressive phases with actionable subtasks and recommended free tutorial resources on YouTube.`;
-    phases = [
-      { name: "Phase 1: Core Fundamentals & Blueprint", duration: "Weeks 1–4", focus: `Core theory, syntax/syllabus and foundational concepts of ${raw}` },
-      { name: "Phase 2: Practical Application & Projects", duration: "Weeks 5–10", focus: "Hands-on exercises, standard problem-solving and portfolio work" },
-      { name: "Phase 3: Advanced Mastery & Review", duration: "Weeks 11–16", focus: "Simulated assessments, edge-case debugging and final sprint" },
-    ];
-    subtasks = [
-      { id: "sub-1", title: `Outline official syllabus and high-yield milestones for ${raw}`, status: "pending", weight: "Planning" },
-      { id: "sub-2", title: "Complete curated introductory lecture series", status: "pending", weight: "Learning" },
-      { id: "sub-3", title: "Complete 5 practical hands-on exercises or past papers", status: "pending", weight: "Practice" },
-      { id: "sub-4", title: "Conduct weekly revision and diagnostic self-testing", status: "pending", weight: "Retention" },
-    ];
-    resources = [
-      {
-        title: `${raw} Complete Course Tutorial`,
-        channel: "freeCodeCamp",
-        duration: "Full Video Course",
-        why: "Comprehensive zero-to-hero guide with real-world practical examples.",
-        url: `https://www.youtube.com/results?search_query=${encodeURIComponent("freecodecamp " + raw)}`,
-      },
-      {
-        title: `${raw} Concepts & Problem Solving`,
-        channel: "YouTube Learning",
-        duration: "Curated Playlist",
-        why: "Targeted explanations and problem walkthroughs from top industry educators.",
-        url: `https://www.youtube.com/results?search_query=${encodeURIComponent(raw + " tutorial course")}`,
-      },
-    ];
+  // If the user is just asking to open the task breaker / flowchart view without specifying a goal:
+  if (/^(?:open|show|view|launch)?\s*(?:the\s+)?(?:task\s+breaker|flowchart|roadmap)\s*(?:studio|view)?$/i.test(m.trim())) {
+    return {
+      text: "⚡ Opening **Task Breaker Studio** with your roadmap and interactive flowchart.",
+      blocks: [
+        {
+          type: "result",
+          title: "Task Breaker Studio",
+          lines: ["Opened interactive multi-phase roadmap flowchart and subtasks explorer."],
+          action: { type: "open_task_breaker", payload: {} },
+        },
+      ],
+    };
   }
 
-  const wantsGoal = /goal|long.?term|active|make\s+this|save|track|prepare/i.test(m);
+  // Generate deep breakdown for ANY goal using the Goal Breakdown Engine!
+  const breakdown = await generateGoalBreakdown(m);
+  const goalName = breakdown.goal;
+  const timeline = breakdown.timeline;
+  const phases = breakdown.phases.map((p) => ({ name: p.name, duration: p.duration, focus: p.focus }));
+  const subtasks = breakdown.subtasks.map((st) => ({
+    id: st.id,
+    title: st.title,
+    status: (st.status === "completed" ? "done" : "pending") as "pending" | "in_progress" | "done",
+    weight: st.weight,
+  }));
+  const resources = breakdown.resources;
+
+  const wantsGoal = /goal|long.?term|active|make\s+this|save|track|prepare|set\s+up|add\s+as\s+active/i.test(m);
   let goalAdded = false;
+
   if (wantsGoal) {
-    const existing = await findGoal(isGate ? "GATE" : isDsa ? "DSA" : goalName);
+    const existing = await findGoal(breakdown.topic || goalName);
     if (!existing || existing.status !== "active") {
       const goalId = randomUUID();
-      const deadline = at(isGate ? 240 : 120, 23, 59);
+      const deadline = at(180, 23, 59);
       await db.insert(goals).values({
         id: goalId,
         title: goalName,
@@ -2152,7 +1931,7 @@ async function hBreakGoal(m: string, { runId }: Ctx): Promise<ChatContent> {
         });
       }
 
-      for (const st of subtasks) {
+      for (const st of subtasks.slice(0, 20)) {
         await db.insert(tasks).values({
           id: randomUUID(),
           goalId,
@@ -2160,16 +1939,18 @@ async function hBreakGoal(m: string, { runId }: Ctx): Promise<ChatContent> {
           priority: "high",
           status: "inbox",
           deadline: at(3, 18),
-          source: "Agent",
+          source: "Goal Subtask",
         });
       }
       goalAdded = true;
     } else {
       goalAdded = true;
     }
-
-    summaryText = `🎯 **I have added "${goalName}" as an Active Goal in your Orbit dashboard!** It is now visible under your **Goals** tab and on your **Home** overview.\n\nDecomposed into ${phases.length} structured milestone phases with ${subtasks.length} actionable subtasks, plus curated YouTube lecture playlists below:`;
   }
+
+  const summaryText = goalAdded
+    ? `🎯 **I have added "${goalName}" as an Active Goal in your Orbit dashboard!** It is now visible under your **Goals** tab and on your **Home** overview.\n\n${breakdown.summary}`
+    : `🎯 **Here is your researched milestone plan and subtasks breakdown for "${goalName}":**\n\n${breakdown.summary}\n\n*Note:* This plan is provided as research and guidance. Click **"Add as active goal in Orbit"** to track it live in your dashboard.`;
 
   await logAudit({
     action: goalAdded ? `goal.created — "${goalName}"` : `goal.breakdown — "${goalName}"`,
@@ -2191,12 +1972,13 @@ async function hBreakGoal(m: string, { runId }: Ctx): Promise<ChatContent> {
         phases,
         subtasks,
         resources,
+        breakdown,
         isAdded: goalAdded,
       },
       {
         type: "chips",
         chips: [
-          { label: "Open Task Breaker (110 Steps)", send: "Open task breaker flowchart" },
+          { label: `Open Task Breaker Flowchart (${breakdown.subtasks.length} Steps)`, send: `Open task breaker flowchart for ${goalName}` },
           { label: "What's my next action?", send: "What's my next action?" },
           { label: "What's important today?", send: "What's important today?" },
         ],

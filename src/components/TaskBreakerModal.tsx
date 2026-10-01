@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useMemo } from "react";
-import { GATE_CATEGORIES, GATE_SUBTASKS, type CuratedSubtask } from "@/lib/gateCurriculum";
+import { generateGoalBreakdown, type GoalBreakdown } from "@/lib/goalBreakerEngine";
 import { Badge, Btn, Icon } from "./ui";
 
 export default function TaskBreakerModal() {
@@ -16,10 +16,46 @@ export default function TaskBreakerModal() {
       return false;
     }
   });
+
   const [activeTab, setActiveTab] = useState<"flowchart" | "explorer">("flowchart");
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [completedIds, setCompletedIds] = useState<Record<string, boolean>>({});
+
+  // Active Goal Breakdown state
+  const [breakdown, setBreakdown] = useState<GoalBreakdown | null>(() => {
+    if (typeof window === "undefined") return null;
+    try {
+      const saved = localStorage.getItem("orbit_active_breakdown");
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return null;
+  });
+
+  // Ensure an initial breakdown is always available (defaults to GATE or saved)
+  useEffect(() => {
+    if (!breakdown) {
+      generateGoalBreakdown("GATE CS & IT").then((b) => {
+        setBreakdown(b);
+      });
+    }
+  }, [breakdown]);
+
+  // Load completed step checks per specific goal
+  useEffect(() => {
+    if (!breakdown) return;
+    const goalKey = breakdown.id || breakdown.goal.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+    try {
+      const saved = localStorage.getItem(`orbit_task_breaker_completed_${goalKey}`);
+      if (saved) {
+        setCompletedIds(JSON.parse(saved));
+      } else {
+        setCompletedIds({});
+      }
+    } catch {
+      setCompletedIds({});
+    }
+  }, [breakdown?.id, breakdown?.goal]);
 
   const togglePin = () => {
     setIsPinned((prev) => {
@@ -31,16 +67,23 @@ export default function TaskBreakerModal() {
     });
   };
 
-  // Load saved state from localStorage
+  // Event Listeners for Opening and Resetting
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem("orbit_task_breaker_completed");
-      if (saved) {
-        setCompletedIds(JSON.parse(saved));
+    const handleOpen = (e: any) => {
+      const detail = e?.detail;
+      if (detail?.breakdown) {
+        setBreakdown(detail.breakdown);
+        try {
+          localStorage.setItem("orbit_active_breakdown", JSON.stringify(detail.breakdown));
+        } catch {}
+      } else if (detail?.goal) {
+        generateGoalBreakdown(detail.goal).then((b) => {
+          setBreakdown(b);
+          try {
+            localStorage.setItem("orbit_active_breakdown", JSON.stringify(b));
+          } catch {}
+        });
       }
-    } catch {}
-
-    const handleOpen = () => {
       setIsOpen(true);
       setIsMinimized(false);
     };
@@ -50,7 +93,10 @@ export default function TaskBreakerModal() {
       setIsMinimized(false);
       setCompletedIds({});
       try {
-        localStorage.removeItem("orbit_task_breaker_completed");
+        if (breakdown) {
+          const goalKey = breakdown.id || breakdown.goal.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+          localStorage.removeItem(`orbit_task_breaker_completed_${goalKey}`);
+        }
       } catch {}
     };
 
@@ -60,29 +106,43 @@ export default function TaskBreakerModal() {
       window.removeEventListener("orbit:open-task-breaker", handleOpen);
       window.removeEventListener("orbit:reset", handleReset);
     };
-  }, []);
+  }, [breakdown]);
 
-  // Save changes to localStorage
+  // Save changes to localStorage per goal
   const toggleStep = (id: string) => {
+    if (!breakdown) return;
+    const goalKey = breakdown.id || breakdown.goal.toLowerCase().replace(/[^a-z0-9]+/g, "-");
     setCompletedIds((prev) => {
       const next = { ...prev, [id]: !prev[id] };
       try {
-        localStorage.setItem("orbit_task_breaker_completed", JSON.stringify(next));
+        localStorage.setItem(`orbit_task_breaker_completed_${goalKey}`, JSON.stringify(next));
       } catch {}
       return next;
     });
   };
 
-  const totalSteps = GATE_SUBTASKS.length;
+  const switchGoalPreset = async (goalTopic: string) => {
+    const b = await generateGoalBreakdown(goalTopic);
+    setBreakdown(b);
+    setSelectedCategory("all");
+    setSearchQuery("");
+    try {
+      localStorage.setItem("orbit_active_breakdown", JSON.stringify(b));
+    } catch {}
+  };
+
+  const subtasksList = breakdown?.subtasks || [];
+  const totalSteps = subtasksList.length;
   const completedCount = useMemo(() => {
     return Object.values(completedIds).filter(Boolean).length;
   }, [completedIds]);
 
-  const percentage = Math.round((completedCount / totalSteps) * 100) || 0;
+  const percentage = Math.round((completedCount / (totalSteps || 1)) * 100) || 0;
 
   // Filtered subtasks for explorer
   const filteredTasks = useMemo(() => {
-    return GATE_SUBTASKS.filter((t) => {
+    if (!breakdown) return [];
+    return breakdown.subtasks.filter((t) => {
       const matchCat = selectedCategory === "all" || t.categoryId === selectedCategory;
       const matchSearch =
         !searchQuery ||
@@ -91,48 +151,15 @@ export default function TaskBreakerModal() {
         t.weight.toLowerCase().includes(searchQuery.toLowerCase());
       return matchCat && matchSearch;
     });
-  }, [selectedCategory, searchQuery]);
+  }, [breakdown, selectedCategory, searchQuery]);
 
   // Flowchart milestones
   const milestones = useMemo(() => {
-    return [
-      {
-        id: "m1",
-        title: "Phase 1: High-Weight Foundations",
-        subtitle: "Engg Maths & Discrete Structures · 21 Steps",
-        categoryIds: ["em", "dm"],
-        color: "#6366f1",
-      },
-      {
-        id: "m2",
-        title: "Phase 2: Core Engineering Systems",
-        subtitle: "Operating Systems, DBMS & Networks · 30 Steps",
-        categoryIds: ["os", "dbms", "cn"],
-        color: "#38bdf8",
-      },
-      {
-        id: "m3",
-        title: "Phase 3: Algorithms & Code Mastery",
-        subtitle: "Data Structures, Algorithms & Logic · 22 Steps",
-        categoryIds: ["dsa", "coa"],
-        color: "#10b981",
-      },
-      {
-        id: "m4",
-        title: "Phase 4: Theoretical CS & Automata",
-        subtitle: "TOC & Compiler Design · 21 Steps",
-        categoryIds: ["toc", "compiler"],
-        color: "#f59e0b",
-      },
-      {
-        id: "m5",
-        title: "Phase 5: Diagnostic Mocks & PYQs",
-        subtitle: "GateOverflow PYQ Analysis & Virtual Mocks · 16 Steps",
-        categoryIds: ["mocks"],
-        color: "#ec4899",
-      },
-    ];
-  }, []);
+    if (!breakdown || !breakdown.phases) return [];
+    return breakdown.phases;
+  }, [breakdown]);
+
+  if (!breakdown) return null;
 
   // If closed and not minimized, do not render any floating pill
   if (!isOpen && !isMinimized) {
@@ -142,14 +169,14 @@ export default function TaskBreakerModal() {
   // If minimized, show sleek floating dock widget in bottom right
   if (isMinimized) {
     return (
-      <div className="fixed bottom-20 right-6 z-50 md:bottom-6">
+      <div className="fixed bottom-20 right-6 z-50 md:bottom-6 animate-fade-in">
         <div className="flex items-center gap-3 rounded-2xl border border-accent/40 bg-surface/95 p-3 shadow-2xl backdrop-blur-md transition-all hover:border-accent">
           <span className="grid h-8 w-8 place-items-center rounded-xl bg-accent/20 text-accent text-sm">
             🎯
           </span>
           <div>
             <div className="flex items-center gap-2 text-[12.5px] font-semibold text-ink">
-              <span>GATE CS Task Breaker</span>
+              <span className="max-w-[170px] truncate">{breakdown.goal}</span>
               <span className="rounded bg-accent/15 px-1.5 py-0.5 font-mono text-[10.5px] text-accent">
                 {completedCount}/{totalSteps} ({percentage}%)
               </span>
@@ -208,19 +235,51 @@ export default function TaskBreakerModal() {
             🎯
           </span>
           <div className="min-w-0">
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <h2 className="text-[14.5px] font-semibold text-ink truncate">
-                Task Breaker Studio · 110-Step Interactive Roadmap
+                Task Breaker Studio · {breakdown.goal}
               </h2>
-              <Badge tone="accent">GATE CS & IT</Badge>
+              <Badge tone="accent">{totalSteps} Steps</Badge>
+              <span className="hidden sm:inline-block rounded-md border border-line bg-white/5 px-2 py-0.5 text-[11px] font-medium text-faint">
+                {breakdown.timeline}
+              </span>
             </div>
-            <p className="text-[11px] text-faint truncate">
-              Curated milestones, subtasks checklist, weightage breakdown & YouTube lecture playlists
+            <p className="text-[11px] text-faint truncate max-w-xl">
+              {breakdown.summary || "Interactive milestone flowchart, actionable subtasks checklist & video lecture sources"}
             </p>
           </div>
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
+          {/* Quick Preset Goal Switcher */}
+          <div className="hidden lg:flex items-center gap-1 rounded-lg border border-line bg-bg p-0.5 text-[11px]">
+            <span className="px-1.5 text-faint text-[10px] uppercase font-mono">Switch:</span>
+            <button
+              onClick={() => switchGoalPreset("GATE CS & IT")}
+              className={`rounded px-1.5 py-0.5 transition ${breakdown.goal.includes("GATE") ? "bg-accent/20 text-accent font-semibold" : "text-muted hover:text-ink"}`}
+            >
+              GATE CS
+            </button>
+            <button
+              onClick={() => switchGoalPreset("Tech Startup & Wealth Building")}
+              className={`rounded px-1.5 py-0.5 transition ${breakdown.goal.includes("Startup") || breakdown.goal.includes("Billionaire") ? "bg-accent/20 text-accent font-semibold" : "text-muted hover:text-ink"}`}
+            >
+              Startup/Wealth
+            </button>
+            <button
+              onClick={() => switchGoalPreset("Data Structures & Algorithms")}
+              className={`rounded px-1.5 py-0.5 transition ${breakdown.goal.includes("Data Structures") ? "bg-accent/20 text-accent font-semibold" : "text-muted hover:text-ink"}`}
+            >
+              DSA
+            </button>
+            <button
+              onClick={() => switchGoalPreset("Full Stack Web Development")}
+              className={`rounded px-1.5 py-0.5 transition ${breakdown.goal.includes("Full Stack") ? "bg-accent/20 text-accent font-semibold" : "text-muted hover:text-ink"}`}
+            >
+              Full Stack
+            </button>
+          </div>
+
           {/* View Switcher */}
           <div className="flex rounded-lg border border-line bg-bg p-0.5 text-xs">
             <button
@@ -257,7 +316,7 @@ export default function TaskBreakerModal() {
               title={isPinned ? "Unpin from side (switch to center modal)" : "Pin to side (keep studio visible while chatting)"}
             >
               <span>📌</span>
-              <span className="hidden sm:inline">{isPinned ? "Pinned to Side" : "Pin to Side"}</span>
+              <span className="hidden sm:inline">{isPinned ? "Pinned" : "Pin"}</span>
             </button>
             <button
               onClick={() => {
@@ -296,267 +355,276 @@ export default function TaskBreakerModal() {
         </div>
       </div>
 
-        {/* Global Progress Bar Bar */}
-        <div className="flex items-center justify-between border-b border-line/60 bg-bg/25 px-5 py-2.5">
-          <div className="flex items-center gap-4">
-            <div className="flex items-baseline gap-1.5">
-              <span className="font-mono text-base font-bold text-accent">{completedCount}</span>
-              <span className="text-[12px] text-faint">/ {totalSteps} steps completed</span>
-            </div>
-            <div className="h-2 w-48 overflow-hidden rounded-full bg-white/10 md:w-64">
-              <div
-                className="h-full bg-gradient-to-r from-accent to-emerald-400 transition-all duration-300"
-                style={{ width: `${percentage}%` }}
-              />
-            </div>
-            <span className="font-mono text-[11px] font-semibold text-muted">{percentage}% Complete</span>
+      {/* Global Progress Bar Bar */}
+      <div className="flex items-center justify-between border-b border-line/60 bg-bg/25 px-5 py-2.5">
+        <div className="flex items-center gap-4">
+          <div className="flex items-baseline gap-1.5">
+            <span className="font-mono text-base font-bold text-accent">{completedCount}</span>
+            <span className="text-[12px] text-faint">/ {totalSteps} steps completed</span>
           </div>
-
-          <div className="flex items-center gap-2 text-[11px] text-faint">
-            <span className="hidden md:inline">💡 You can minimize anytime to chat or manage tasks uninterrupted</span>
-            <button
-              onClick={() => {
-                if (confirm("Reset all step completion checks for this roadmap?")) {
-                  setCompletedIds({});
-                  localStorage.removeItem("orbit_task_breaker_completed");
-                }
-              }}
-              className="text-faint hover:text-muted underline ml-2"
-            >
-              Reset
-            </button>
+          <div className="h-2 w-48 overflow-hidden rounded-full bg-white/10 md:w-64">
+            <div
+              className="h-full bg-gradient-to-r from-accent to-emerald-400 transition-all duration-300"
+              style={{ width: `${percentage}%` }}
+            />
           </div>
+          <span className="font-mono text-[11px] font-semibold text-muted">{percentage}% Complete</span>
         </div>
 
-        {/* Content Body */}
-        <div className="flex-1 overflow-y-auto p-5">
-          {activeTab === "flowchart" ? (
-            /* Flowchart Node Graph View */
-            <div className="space-y-8">
-              {milestones.map((m, mIndex) => {
-                const phaseTasks = GATE_SUBTASKS.filter((t) => m.categoryIds.includes(t.categoryId));
-                const phaseDone = phaseTasks.filter((t) => completedIds[t.id]).length;
-                const phasePct = Math.round((phaseDone / phaseTasks.length) * 100) || 0;
+        <div className="flex items-center gap-2 text-[11px] text-faint">
+          <span className="hidden md:inline">💡 You can minimize anytime to chat or manage tasks uninterrupted</span>
+          <button
+            onClick={() => {
+              if (confirm(`Reset all step completion checks for "${breakdown.goal}"?`)) {
+                setCompletedIds({});
+                const goalKey = breakdown.id || breakdown.goal.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+                localStorage.removeItem(`orbit_task_breaker_completed_${goalKey}`);
+              }
+            }}
+            className="text-faint hover:text-muted underline ml-2"
+          >
+            Reset
+          </button>
+        </div>
+      </div>
 
-                return (
-                  <div
-                    key={m.id}
-                    className="relative rounded-xl border border-line bg-surface p-4 shadow-sm transition-all hover:border-line/90"
-                  >
-                    {/* Milestone Header */}
-                    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line pb-3">
-                      <div className="flex items-center gap-2.5">
-                        <span
-                          className="flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold text-black"
-                          style={{ backgroundColor: m.color }}
-                        >
-                          {mIndex + 1}
-                        </span>
-                        <div>
-                          <h3 className="text-sm font-semibold text-ink">{m.title}</h3>
-                          <div className="text-[11px] text-faint">{m.subtitle}</div>
-                        </div>
-                      </div>
+      {/* Content Body */}
+      <div className="flex-1 overflow-y-auto p-5">
+        {activeTab === "flowchart" ? (
+          /* Flowchart Node Graph View */
+          <div className="space-y-8">
+            {milestones.map((m, mIndex) => {
+              let phaseTasks = breakdown.subtasks.filter((t) => m.categoryIds?.includes(t.categoryId));
+              // Fallback partitioning if categories don't match exactly
+              if (phaseTasks.length === 0 && breakdown.phases.length > 0) {
+                const perPhase = Math.ceil(breakdown.subtasks.length / breakdown.phases.length);
+                phaseTasks = breakdown.subtasks.slice(mIndex * perPhase, (mIndex + 1) * perPhase);
+              }
 
-                      <div className="flex items-center gap-3">
-                        <span className="font-mono text-[11px] text-muted">
-                          {phaseDone}/{phaseTasks.length} Done ({phasePct}%)
-                        </span>
-                        <div className="h-1.5 w-24 overflow-hidden rounded-full bg-white/10">
-                          <div
-                            className="h-full transition-all duration-300"
-                            style={{ width: `${phasePct}%`, backgroundColor: m.color }}
-                          />
+              const phaseDone = phaseTasks.filter((t) => completedIds[t.id]).length;
+              const phasePct = Math.round((phaseDone / (phaseTasks.length || 1)) * 100) || 0;
+
+              return (
+                <div
+                  key={m.id || mIndex}
+                  className="relative rounded-xl border border-line bg-surface p-4 shadow-sm transition-all hover:border-line/90"
+                >
+                  {/* Milestone Header */}
+                  <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line pb-3">
+                    <div className="flex items-center gap-2.5">
+                      <span
+                        className="flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold text-black"
+                        style={{ backgroundColor: m.color || "#6366f1" }}
+                      >
+                        {mIndex + 1}
+                      </span>
+                      <div>
+                        <h3 className="text-sm font-semibold text-ink">{m.name}</h3>
+                        <div className="text-[11px] text-faint">
+                          {m.duration} · {m.focus} ({phaseTasks.length} Steps)
                         </div>
                       </div>
                     </div>
 
-                    {/* Flow Nodes Grid */}
-                    <div className="mt-3 grid gap-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
-                      {phaseTasks.map((task, i) => {
-                        const isDone = !!completedIds[task.id];
-                        return (
-                          <div
-                            key={task.id}
-                            onClick={() => toggleStep(task.id)}
-                            className={`group relative flex cursor-pointer flex-col justify-between rounded-lg border p-2.5 transition-all ${
-                              isDone
-                                ? "border-emerald-500/40 bg-emerald-950/15"
-                                : "border-line bg-bg/60 hover:border-accent/40 hover:bg-surface"
-                            }`}
-                          >
-                            <div className="flex items-start gap-2">
-                              <input
-                                type="checkbox"
-                                checked={isDone}
-                                onChange={() => toggleStep(task.id)}
-                                onClick={(e) => e.stopPropagation()}
-                                className="mt-0.5 h-3.5 w-3.5 rounded border-line text-accent focus:ring-0"
-                              />
-                              <div className="flex-1">
-                                <span
-                                  className={`text-[12px] font-medium leading-tight ${
-                                    isDone ? "line-through text-muted" : "text-ink group-hover:text-accent"
-                                  }`}
-                                >
-                                  {task.title}
-                                </span>
-                              </div>
-                            </div>
+                    <div className="flex items-center gap-3">
+                      <span className="font-mono text-[11px] text-muted">
+                        {phaseDone}/{phaseTasks.length} Done ({phasePct}%)
+                      </span>
+                      <div className="h-1.5 w-24 overflow-hidden rounded-full bg-white/10">
+                        <div
+                          className="h-full transition-all duration-300"
+                          style={{ width: `${phasePct}%`, backgroundColor: m.color || "#6366f1" }}
+                        />
+                      </div>
+                    </div>
+                  </div>
 
-                            <div className="mt-2.5 flex items-center justify-between border-t border-line/40 pt-1.5 text-[10px]">
-                              <span className="text-faint">{task.categoryName}</span>
-                              <a
-                                href={task.resource.url}
-                                target="_blank"
-                                rel="noreferrer"
-                                onClick={(e) => e.stopPropagation()}
-                                className="flex items-center gap-1 rounded bg-white/5 px-1.5 py-0.5 text-accent hover:bg-accent/20"
-                                title={`Watch ${task.resource.title} on YouTube`}
+                  {/* Flow Nodes Grid */}
+                  <div className="mt-3 grid gap-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
+                    {phaseTasks.map((task) => {
+                      const isDone = !!completedIds[task.id];
+                      return (
+                        <div
+                          key={task.id}
+                          onClick={() => toggleStep(task.id)}
+                          className={`group relative flex cursor-pointer flex-col justify-between rounded-lg border p-2.5 transition-all ${
+                            isDone
+                              ? "border-emerald-500/40 bg-emerald-950/15"
+                              : "border-line bg-bg/60 hover:border-accent/40 hover:bg-surface"
+                          }`}
+                        >
+                          <div className="flex items-start gap-2">
+                            <input
+                              type="checkbox"
+                              checked={isDone}
+                              onChange={() => toggleStep(task.id)}
+                              onClick={(e) => e.stopPropagation()}
+                              className="mt-0.5 h-3.5 w-3.5 rounded border-line text-accent focus:ring-0"
+                            />
+                            <div className="flex-1">
+                              <span
+                                className={`text-[12px] font-medium leading-tight ${
+                                  isDone ? "line-through text-muted" : "text-ink group-hover:text-accent"
+                                }`}
                               >
-                                <span>▶</span> Lecture
-                              </a>
+                                {task.title}
+                              </span>
                             </div>
                           </div>
-                        );
-                      })}
+
+                          <div className="mt-2.5 flex items-center justify-between border-t border-line/40 pt-1.5 text-[10px]">
+                            <span className="text-faint truncate max-w-[120px]">{task.categoryName}</span>
+                            <a
+                              href={task.resource.url}
+                              target="_blank"
+                              rel="noreferrer"
+                              onClick={(e) => e.stopPropagation()}
+                              className="flex items-center gap-1 rounded bg-white/5 px-1.5 py-0.5 text-accent hover:bg-accent/20"
+                              title={`Watch ${task.resource.title} on YouTube`}
+                            >
+                              <span>▶</span> {task.resource.badge || "Lecture"}
+                            </a>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Connecting Visual Arrow to next milestone */}
+                  {mIndex < milestones.length - 1 && (
+                    <div className="absolute -bottom-6 left-8 flex items-center gap-1 text-[11px] font-mono text-faint">
+                      <span>↓</span> Connected Sequence
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          /* Categorized Step Explorer View */
+          <div className="space-y-4">
+            {/* Category Pills & Search */}
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div className="flex flex-wrap gap-1.5">
+                <button
+                  onClick={() => setSelectedCategory("all")}
+                  className={`rounded-lg px-2.5 py-1 text-[11.5px] font-medium transition-colors ${
+                    selectedCategory === "all"
+                      ? "bg-accent text-black font-semibold"
+                      : "border border-line bg-bg text-muted hover:text-ink"
+                  }`}
+                >
+                  All Topics ({totalSteps})
+                </button>
+                {breakdown.categories.map((cat) => {
+                  const count = breakdown.subtasks.filter((t) => t.categoryId === cat.id).length;
+                  const isSelected = selectedCategory === cat.id;
+                  return (
+                    <button
+                      key={cat.id}
+                      onClick={() => setSelectedCategory(cat.id)}
+                      className={`flex items-center gap-1 rounded-lg px-2 py-1 text-[11.5px] font-medium transition-colors ${
+                        isSelected
+                          ? "bg-accent/20 text-accent font-semibold border border-accent/40"
+                          : "border border-line bg-bg text-muted hover:text-ink"
+                      }`}
+                    >
+                      <span>{cat.icon}</span> {cat.shortName} ({count})
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="w-full md:w-64">
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Search subtasks or topics..."
+                  className="w-full rounded-lg border border-line bg-bg px-3 py-1.5 text-xs text-ink placeholder:text-faint focus:border-accent focus:outline-none"
+                />
+              </div>
+            </div>
+
+            {/* Subtask Cards List */}
+            <div className="grid gap-2.5 md:grid-cols-2">
+              {filteredTasks.map((t, idx) => {
+                const isDone = !!completedIds[t.id];
+                return (
+                  <div
+                    key={t.id}
+                    onClick={() => toggleStep(t.id)}
+                    className={`flex cursor-pointer flex-col justify-between rounded-xl border p-3 transition-all ${
+                      isDone
+                        ? "border-emerald-500/35 bg-emerald-950/10"
+                        : "border-line bg-bg/50 hover:border-accent/40 hover:bg-surface"
+                    }`}
+                  >
+                    <div className="flex items-start gap-2.5">
+                      <input
+                        type="checkbox"
+                        checked={isDone}
+                        onChange={() => toggleStep(t.id)}
+                        onClick={(e) => e.stopPropagation()}
+                        className="mt-1 h-4 w-4 rounded border-line text-accent focus:ring-0"
+                      />
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono text-[10px] text-faint">#{idx + 1}</span>
+                          <span
+                            className={`text-[13px] font-medium ${
+                              isDone ? "line-through text-muted" : "text-ink"
+                            }`}
+                          >
+                            {t.title}
+                          </span>
+                        </div>
+                        <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                          <Badge tone="muted">{t.categoryName}</Badge>
+                          <Badge tone="accent">{t.weight}</Badge>
+                        </div>
+                      </div>
                     </div>
 
-                    {/* Connecting Visual Arrow to next milestone */}
-                    {mIndex < milestones.length - 1 && (
-                      <div className="absolute -bottom-6 left-8 flex items-center gap-1 text-[11px] font-mono text-faint">
-                        <span>↓</span> Connected Flow
-                      </div>
-                    )}
+                    <div className="mt-3 flex items-center justify-between border-t border-line/50 pt-2 text-[11px]">
+                      <span className="text-muted truncate max-w-[240px]">
+                        📚 {t.resource.creator}
+                      </span>
+                      <a
+                        href={t.resource.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                        className="flex items-center gap-1 rounded-md bg-accent/15 px-2.5 py-1 text-accent font-medium hover:bg-accent/25 transition-colors"
+                      >
+                        <span>▶</span> {t.resource.badge || "Watch Course"}
+                      </a>
+                    </div>
                   </div>
                 );
               })}
             </div>
-          ) : (
-            /* Categorized Step Explorer View */
-            <div className="space-y-4">
-              {/* Category Pills & Search */}
-              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                <div className="flex flex-wrap gap-1.5">
-                  <button
-                    onClick={() => setSelectedCategory("all")}
-                    className={`rounded-lg px-2.5 py-1 text-[11.5px] font-medium transition-colors ${
-                      selectedCategory === "all"
-                        ? "bg-accent text-black font-semibold"
-                        : "border border-line bg-bg text-muted hover:text-ink"
-                    }`}
-                  >
-                    All Topics ({totalSteps})
-                  </button>
-                  {GATE_CATEGORIES.map((cat) => {
-                    const count = GATE_SUBTASKS.filter((t) => t.categoryId === cat.id).length;
-                    const isSelected = selectedCategory === cat.id;
-                    return (
-                      <button
-                        key={cat.id}
-                        onClick={() => setSelectedCategory(cat.id)}
-                        className={`flex items-center gap-1 rounded-lg px-2 py-1 text-[11.5px] font-medium transition-colors ${
-                          isSelected
-                            ? "bg-accent/20 text-accent font-semibold border border-accent/40"
-                            : "border border-line bg-bg text-muted hover:text-ink"
-                        }`}
-                      >
-                        <span>{cat.icon}</span> {cat.shortName} ({count})
-                      </button>
-                    );
-                  })}
-                </div>
+          </div>
+        )}
+      </div>
 
-                <div className="w-full md:w-64">
-                  <input
-                    type="text"
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder="Search topics (e.g. Deadlock)..."
-                    className="w-full rounded-lg border border-line bg-bg px-3 py-1.5 text-xs text-ink placeholder:text-faint focus:border-accent focus:outline-none"
-                  />
-                </div>
-              </div>
-
-              {/* Subtask Cards List */}
-              <div className="grid gap-2.5 md:grid-cols-2">
-                {filteredTasks.map((t, idx) => {
-                  const isDone = !!completedIds[t.id];
-                  return (
-                    <div
-                      key={t.id}
-                      onClick={() => toggleStep(t.id)}
-                      className={`flex cursor-pointer flex-col justify-between rounded-xl border p-3 transition-all ${
-                        isDone
-                          ? "border-emerald-500/35 bg-emerald-950/10"
-                          : "border-line bg-bg/50 hover:border-accent/40 hover:bg-surface"
-                      }`}
-                    >
-                      <div className="flex items-start gap-2.5">
-                        <input
-                          type="checkbox"
-                          checked={isDone}
-                          onChange={() => toggleStep(t.id)}
-                          onClick={(e) => e.stopPropagation()}
-                          className="mt-1 h-4 w-4 rounded border-line text-accent focus:ring-0"
-                        />
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2">
-                            <span className="font-mono text-[10px] text-faint">#{idx + 1}</span>
-                            <span
-                              className={`text-[13px] font-medium ${
-                                isDone ? "line-through text-muted" : "text-ink"
-                              }`}
-                            >
-                              {t.title}
-                            </span>
-                          </div>
-                          <div className="mt-1 flex flex-wrap items-center gap-1.5">
-                            <Badge tone="muted">{t.categoryName}</Badge>
-                            <Badge tone="accent">{t.weight}</Badge>
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="mt-3 flex items-center justify-between border-t border-line/50 pt-2 text-[11px]">
-                        <span className="text-muted truncate max-w-[240px]">
-                          📚 {t.resource.creator}
-                        </span>
-                        <a
-                          href={t.resource.url}
-                          target="_blank"
-                          rel="noreferrer"
-                          onClick={(e) => e.stopPropagation()}
-                          className="flex items-center gap-1 rounded-md bg-accent/15 px-2.5 py-1 text-accent font-medium hover:bg-accent/25 transition-colors"
-                        >
-                          <span>▶</span> Watch Playlist
-                        </a>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
+      {/* Footer Summary with Learning Resources */}
+      <div className="flex flex-wrap items-center justify-between border-t border-line bg-bg/40 px-5 py-3 text-xs text-muted gap-2">
+        <div className="flex items-center gap-2 truncate">
+          <span className="text-accent font-medium">🎯 {breakdown.goal}</span>
+          <span>•</span>
+          <span className="text-faint">{totalSteps} interactive steps tracked across sessions</span>
         </div>
-
-        {/* Footer Summary */}
-        <div className="flex items-center justify-between border-t border-line bg-bg/40 px-5 py-3 text-xs text-muted">
-          <div className="flex items-center gap-2">
-            <span>Flowchart roadmap active</span>
-            <span>•</span>
-            <span>All subtasks are tracked across sessions</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <Btn size="sm" onClick={() => setIsMinimized(true)}>
-              Minimize to Dock
-            </Btn>
-            <Btn variant="primary" size="sm" onClick={() => setIsOpen(false)}>
-              Done
-            </Btn>
-          </div>
+        <div className="flex items-center gap-2">
+          <Btn size="sm" onClick={() => setIsMinimized(true)}>
+            Minimize to Dock
+          </Btn>
+          <Btn variant="primary" size="sm" onClick={() => setIsOpen(false)}>
+            Done
+          </Btn>
         </div>
       </div>
+    </div>
   );
 
   if (isPinned) {

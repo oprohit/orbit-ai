@@ -23,6 +23,7 @@ export type Block =
       subtasks: { id: string; title: string; status: "pending" | "in_progress" | "done"; weight?: string }[];
       resources: { title: string; channel: string; duration: string; why: string; url: string }[];
       isAdded?: boolean;
+      breakdown?: any;
     };
 
 export type ChatContent = {

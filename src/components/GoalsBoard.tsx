@@ -322,6 +322,24 @@ export default function GoalsBoard({ goals }: { goals: GoalView[] }) {
                 <div className="mt-1.5">
                   <Progress value={pct} tone={isDone ? "ok" : pct >= 60 ? "ok" : "accent"} />
                 </div>
+                <div className="mt-2.5 flex items-center justify-between border-t border-line/40 pt-2 text-xs">
+                  <span
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (typeof window !== "undefined") {
+                        window.dispatchEvent(
+                          new CustomEvent("orbit:open-task-breaker", { detail: { goal: g.title } })
+                        );
+                      }
+                    }}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-accent/40 bg-accent/10 px-2.5 py-1 text-[11.5px] font-semibold text-accent hover:bg-accent hover:text-black transition cursor-pointer"
+                  >
+                    <span>🎯</span> Open Task Breaker Flowchart
+                  </span>
+                  <span className="text-faint font-mono text-[11px]">
+                    {g.tasks.length || g.milestones.length} objectives/milestones
+                  </span>
+                </div>
               </button>
 
               {isOpen && (

@@ -678,12 +678,16 @@ function BlockView({
                 type="button"
                 onClick={() => {
                   if (typeof window !== "undefined") {
-                    window.dispatchEvent(new CustomEvent("orbit:open-task-breaker", { detail: { goal: b.goal } }));
+                    window.dispatchEvent(
+                      new CustomEvent("orbit:open-task-breaker", {
+                        detail: { goal: b.goal, breakdown: (b as any).breakdown },
+                      })
+                    );
                   }
                 }}
                 className="inline-flex items-center gap-1.5 rounded-lg border border-accent/60 bg-accent/20 px-3 py-1.5 text-[11.5px] font-semibold text-accent shadow-sm transition hover:bg-accent hover:text-black"
               >
-                <span>🎯</span> Open Task Breaker Flowchart (110 Steps)
+                <span>🎯</span> Open Task Breaker Flowchart ({(b as any).breakdown?.subtasks?.length || b.subtasks?.length || 16} Steps)
               </button>
               {(addedGoals?.[b.goal] || b.isAdded) ? (
                 <button
@@ -842,10 +846,18 @@ export default function Chat({ initialMessages }: { initialMessages: Msg[] }) {
           phases: b.phases,
           subtasks: b.subtasks,
           deadline: b.timeline,
+          breakdown: (b as any).breakdown,
         }),
       });
       if (res.ok) {
         setAddedGoals((prev) => ({ ...prev, [b.goal]: true }));
+        if (typeof window !== "undefined" && (b as any).breakdown) {
+          window.dispatchEvent(
+            new CustomEvent("orbit:open-task-breaker", {
+              detail: { goal: b.goal, breakdown: (b as any).breakdown },
+            })
+          );
+        }
         setMessages((ms) => [
           ...ms,
           {
@@ -1172,7 +1184,15 @@ export default function Chat({ initialMessages }: { initialMessages: Msg[] }) {
         // Client-side Desktop Agent Bridge execution
         const blocks = data.assistant.content?.blocks || [];
         for (const blk of blocks) {
-          if (blk.type === "study_plan" || (blk.type === "result" && blk.action?.type === "open_task_breaker")) {
+          if (blk.type === "study_plan") {
+            if (typeof window !== "undefined") {
+              window.dispatchEvent(
+                new CustomEvent("orbit:open-task-breaker", {
+                  detail: { goal: blk.goal, breakdown: (blk as any).breakdown },
+                })
+              );
+            }
+          } else if (blk.type === "result" && blk.action?.type === "open_task_breaker") {
             if (typeof window !== "undefined") {
               window.dispatchEvent(new CustomEvent("orbit:open-task-breaker"));
             }
